@@ -22,8 +22,8 @@ from pi_sandbox.paths import (
     content_name,
     json_bytes,
     private_dir,
+    trusted_bytes,
     trusted_directory,
-    trusted_text,
 )
 from pi_sandbox.platform import Platform
 
@@ -55,7 +55,7 @@ def store_lock(config: Config) -> Generator[int]:
 
 
 def install(root: Path, directory: int, filename: str, content: bytes) -> None:
-    existing = trusted_text(filename, parent=directory, optional=True)
+    existing = trusted_bytes(filename, parent=directory, optional=True)
     if existing is None:
         fd, temporary = tempfile.mkstemp(prefix='.profile.', dir=root)
         try:
@@ -66,10 +66,10 @@ def install(root: Path, directory: int, filename: str, content: bytes) -> None:
             try:
                 os.link(temporary, filename, dst_dir_fd=directory)
             except FileExistsError:
-                existing = trusted_text(filename, parent=directory)
+                existing = trusted_bytes(filename, parent=directory)
         finally:
             Path(temporary).unlink(missing_ok=True)
-    if existing is not None and existing.encode() != content:
+    if existing is not None and existing != content:
         raise Refusal(f'immutable profile integrity mismatch: {filename}')
 
 

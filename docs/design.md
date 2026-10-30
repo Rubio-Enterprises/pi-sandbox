@@ -225,7 +225,11 @@ Installed filenames use the first 12 hex characters of SHA-256 of the exact stor
 UTF-8 JSON bytes (sorted keys, two-space indent, trailing newline). Metadata keeps its
 logical name: hashing bytes that themselves contain the resulting hash would be circular.
 nono resolves the chain by filename. Base and layer profiles are published complete via
-exclusive hard-link creation and never overwritten. Existing content must match exactly.
+exclusive hard-link creation and never overwritten. Existing content is read as raw
+bytes through a trusted descriptor-relative, no-follow binary read and compared with
+`json_bytes(value)` without decoding or newline normalization. LF-to-CRLF or LF-to-CR
+mutations are integrity failures even when they preserve JSON meaning. Text decoding
+for TOML/JSON parsing is separate from this exact-byte comparison.
 Launch/validate pin their profiles with shared advisory locks on read-only file
 descriptors; install/pin and pruning operations also share a short-lived store lock.
 Pruning requires a nonblocking exclusive lock on each candidate. This prevents another

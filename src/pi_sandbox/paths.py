@@ -156,9 +156,9 @@ def trusted_directory(path: Path | str, *, parent: int | None = None) -> Generat
         os.close(fd)
 
 
-def trusted_text(
+def trusted_bytes(
     path: Path | str, *, parent: int | None = None, optional: bool = False
-) -> str | None:
+) -> bytes | None:
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
     except FileNotFoundError:
@@ -167,6 +167,13 @@ def trusted_text(
         raise
     except OSError as error:
         raise Refusal(f'{path}: cannot read policy without following symlinks') from error
-    with os.fdopen(fd) as stream:
+    with os.fdopen(fd, 'rb') as stream:
         check_trusted(os.fstat(stream.fileno()), str(path), directory=False)
         return stream.read()
+
+
+def trusted_text(
+    path: Path | str, *, parent: int | None = None, optional: bool = False
+) -> str | None:
+    content = trusted_bytes(path, parent=parent, optional=optional)
+    return None if content is None else content.decode('utf-8')
