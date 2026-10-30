@@ -1,0 +1,12 @@
+[
+  "(deny file-write* (subpath \"/fixture/home/.config/zsh\") (subpath \"/fixture/home/.config/nono/profiles\") (subpath \"/fixture/home/.config/nono/packages\") (subpath \"/fixture/home/.pi/agent/extensions\") (subpath \"/fixture/home/.pi/agent/npm\") (subpath \"/fixture/home/.pi/agent/git\") (subpath \"/fixture/home/.pi/agent/bin\") (subpath \"/fixture/home/.pi/agent/skills\") (subpath \"/fixture/home/.pi/config\") (literal \"/fixture/home/.pi/agent/settings.json\") (literal \"/fixture/home/.pi/agent/mcp.json\") (literal \"/fixture/home/.pi/agent/models.json\") (literal \"/fixture/home/.pi/agent/llama-swap-discovery.json\") (literal \"/fixture/home/.pi/agent/AGENTS.md\") (literal \"/fixture/home/.pi/agent/keybindings.json\") (literal \"/fixture/home/.pi/agent/capability-exposure.json\") (regex #\"/\\.git/hooks(/|$)\") (regex #\"/\\.git/(config(\\.worktree)?|worktrees/[^/]+/config\\.worktree)(\\.lock)?$\"))",
+  "(deny file-write* (require-all (subpath \"/fixture/protected\") (require-not (subpath \"/fixture/protected/.git\"))))",
+  "(deny device-microphone)",
+  "(deny process-exec (literal \"/usr/bin/open\") (literal \"/usr/bin/osascript\"))",
+  "(allow process-exec (literal \"/bin/ps\") (with no-sandbox))",
+  "(deny mach-lookup (global-name \"com.apple.coreservices.appleevents\") (global-name \"com.apple.xpc.smd\") (global-name \"com.apple.backgroundtaskmanagementagent\"))",
+  "(allow ipc-sysv-sem)",
+  "(allow mach-register (global-name-regex #\"^com\\.google\\.Chrome\\.MachPortRendezvousServer\\.\") (global-name-regex #\"^com\\.google\\.Chrome\\.crashpad\\.child_port_handshake\\.\") (global-name-regex #\"^com\\.google\\.chrome\\.for\\.testing\\.MachPortRendezvousServer\\.\") (global-name-regex #\"^com\\.google\\.chrome\\.for\\.testing\\.crashpad\\.child_port_handshake\\.\") (global-name-regex #\"^org\\.chromium\\.Chromium\\.MachPortRendezvousServer\\.\") (global-name-regex #\"^org\\.chromium\\.crashpad\\.child_port_handshake\\.\"))",
+  "(allow iokit-open (iokit-user-client-class \"RootDomainUserClient\"))",
+  "(deny file-read-data file-write* network-outbound (regex #\"^/private/tmp/(tmux|piab)-[^/]*(/|$)\" #\"^/private/var/folders/[^/]+/[^/]+/T/(herdr|vscode-git|ssh-askpass)-[^/]*(/|$)\" #\"^/private/var/run/com\\.apple\\.launchd\\.[^/]*(/|$)\"))"
+]
