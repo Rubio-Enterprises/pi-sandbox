@@ -83,8 +83,9 @@ def notice(
             'to start unsandboxed commands or bypass the grants.',
         ]
     lines += [
-        '- GitHub is read-only when provisioned, otherwise unavailable. Private repositories '
-        'outside the token scope answer 404 or ask for credentials by design. Never push, open '
+        '- GitHub is read-only when provisioned, otherwise unavailable. The token covers '
+        'one organization: a private repository elsewhere answers 404 or asks for credentials '
+        'by design. Never push, open '
         'PRs, merge, approve, or try another token or Keychain. Commit on a branch in the '
         'worktree with the supplied `GIT_AUTHOR_*`/`GIT_COMMITTER_*` identity, then tell the '
         'user which branch and worktree to publish outside the sandbox.',

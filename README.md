@@ -42,7 +42,8 @@ pi-sandbox-ctl doctor
 ```
 
 Setup pulls the signed `nolabs-ai/pi@0.2.2` pack if needed and installs the
-engine/layer profiles. It sets the pack's Pi settings entry to `skills = []`,
+engine/layer profiles. Pack profile bytes must match nono's recorded SHA-256.
+It sets the pack's Pi settings entry to `skills = []`,
 so its sandbox-only skills do not load in ordinary Pi sessions. The launch
 wrapper loads those skills inside nono. Other packs are preserved.
 
@@ -107,7 +108,11 @@ pi-sandbox-ctl pack
 
 Native fragments keep nono's syntax. They cannot set `extends`, `workdir`,
 raw Seatbelt rules, or another profile name. Installed layer profiles are
-atomically refreshed and stale engine-owned profiles are removed.
+content-addressed and installed without overwriting existing files. Launches
+pin their immutable chains. `pi-sandbox-ctl setup` and `pi-sandbox-ctl prune`
+remove only unreferenced profiles older than 24 hours; launches never prune.
+Empty layer directories are ignored. Layer files/directories must be user-owned,
+not symlinks, and not group/world-writable.
 
 ## Credentials
 
@@ -117,7 +122,8 @@ Provision read-only credentials outside the sandbox in the engine root's
 Without it, GitHub is disabled; inherited human tokens are not substituted.
 `pi-sandbox-ghcr.token` supplies only Docker's `ghcr.io` auth entry.
 Trailing newlines are stripped. Tokens never go into argv, profiles, notices,
-wrappers, or Git configuration.
+wrappers, or Git configuration. The GitHub token covers one organization;
+private repositories elsewhere answer 404 or ask for credentials by design.
 
 Generic slots are opt-in:
 
@@ -145,7 +151,10 @@ command = ["~/.local/libexec/pi-sandbox/listener-inventory"]
 platforms = ["macos"]
 ```
 
-Hooks run outside nono with a 30-second timeout. stdin carries schema, OS,
+Hooks run outside nono, before credentials, with a 30-second timeout and a
+1 MiB limit per output stream. Hook executables must be outside all launch RW
+grants, including resolved symlink targets. Each hook has a private process group;
+timeout or interruption terminates that group and reaps its direct process. stdin carries schema, OS,
 workdir, launch directory, and HOME as JSON. Success returns empty stdout or
 `{"seatbelt_rules":["(deny …)"],"notice":["- Policy note."]}`.
 Rules are macOS-only; notices work on both platforms.
