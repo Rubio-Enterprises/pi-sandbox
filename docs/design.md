@@ -293,8 +293,9 @@ macOS and must be a list of strings starting with `(`. Any other exit refuses th
    the agent-browser socket root `/tmp/sab.XXXXXXXX` and tmux root `/tmp/pst.XXXXXXXX`
    (both 0700, real paths), and grant them (launch dir RO; its `gh`, `docker`, the cache, the
    two roots, artifacts and runtime dirs RW).
-7. macOS raw rules, in this order: static floors (below), Git rules for the workdir, remote port
-   denies, hook rules, host rules.
+7. macOS raw rules, in this order: Git rules for the workdir, remote port denies, hook rules,
+   host rules, then static floors (below, preserving their internal order). Later Seatbelt
+   rules win: the static floors must remain last.
 8. Write `<launch>/notice.md` and `<launch>/bin/pi`; prepend `<launch>/bin` to `PATH`.
 9. Write `<launch>/profile.json`: `extends` the chain; `meta.name` `pi-sandbox-launch`;
    `workdir.access` `readwrite`; `filesystem.allow/read/allow_file/read_file/bypass_protection`;
@@ -333,7 +334,12 @@ Linux override: exclude `user_caches_linux`, allow `/dev/shm`.
 
 ## Raw Seatbelt rules (macOS)
 
-**Static floors** (absolute paths resolved at launch):
+The effective order is **Git rules → remote port denies → hook rules → host rules →
+static floors**. nono 0.80 resolved the predecessor's per-launch rules before the old
+user profile's platform-override rules. Preserve that resolved order, not the old file
+layout: later SBPL rules win, so static floors are applied last.
+
+**Static floors, applied last** (absolute paths resolved at launch):
 
 - `(deny file-write* …)` on `$XDG_CONFIG_HOME/zsh`, nono `profiles` and `packages`, Pi's
   `~/.pi/agent/{extensions,npm,git,bin,skills}` and `~/.pi/config` (subpaths), the literal files
@@ -350,7 +356,8 @@ Linux override: exclude `user_caches_linux`, allow `/dev/shm`.
   These are raw regexes, not native deny globs: nono resolves a native glob by walking its parent
   recursively on every launch, which costs minutes under `/private/tmp` and `$TMPDIR`.
 
-**Dynamic rules:** Git rules for the workdir (deny writes to each resolved `config`,
+**Dynamic rules, applied before the static floors:** Git rules for the workdir (deny writes to
+each resolved `config`,
 `config.worktree` and their `.lock` and real-path variants; deny writes to the common and custom
 hooks directories, refusing a hooks directory that covers the workdir or metadata), remote port
 denies (`(deny network-outbound (remote ip "*:P"))` then `(allow … "localhost:P")`), hook rules,
@@ -444,8 +451,12 @@ inside. `setup` never removes other packs.
   the native policy chain and applies confinement.
 - The nono lockfile and installed profile must both confirm the pinned pack.
   Setup preserves unrelated pack entries and changes only this pack's skill filter.
+- Private temporary roots use exclusive 0700 mkdir with eight cryptographically random
+  alphanumeric characters, preserving the predecessor's socket-path naming contract.
+  Python's `mkdtemp` also emits underscores, so its names do not match that contract.
 - The baseline Seatbelt floor retains default configuration paths and protects XDG
-  configuration overrides too. Hooks add rules only between port rules and host floors.
+  configuration overrides too. Hooks add rules between port rules and host rules; static
+  floors follow all dynamic rules.
 - Linux checks the kernel floor before launch; `doctor` additionally queries Landlock's
   ABI. nono performs the actual platform confinement checks.
 - Tests select OS/kernel/WSL through a Python entry point shipped only under `tests/`.
