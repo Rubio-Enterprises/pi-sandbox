@@ -1,10 +1,13 @@
+import hashlib
 import json
 import os
 import re
 import secrets
+import stat
 import string
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -115,3 +118,53 @@ def atomic_json(path: Path, value: Any) -> None:
         os.replace(name, path)
     finally:
         Path(name).unlink(missing_ok=True)
+
+
+def json_bytes(value: Any) -> bytes:
+    return (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + '\n').encode()
+
+
+def content_name(stem: str, value: Any) -> str:
+    return stem + '-' + hashlib.sha256(json_bytes(value)).hexdigest()[:12]
+
+
+def check_trusted(info: os.stat_result, location: str, *, directory: bool) -> None:
+    correct_type = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
+    if not correct_type or info.st_uid != os.geteuid():
+        raise Refusal(
+            f'{location}: policy must be user-owned and a regular '
+            + ('directory' if directory else 'file')
+        )
+    if info.st_mode & 0o022:
+        raise Refusal(f'{location}: policy must not be group/world-writable')
+
+
+@contextmanager
+def trusted_directory(path: Path | str, *, parent: int | None = None) -> Generator[int]:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+    except FileNotFoundError:
+        raise
+    except OSError as error:
+        raise Refusal(f'{path}: cannot open policy directory without following symlinks') from error
+    try:
+        check_trusted(os.fstat(fd), str(path), directory=True)
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def trusted_text(
+    path: Path | str, *, parent: int | None = None, optional: bool = False
+) -> str | None:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    except FileNotFoundError:
+        if optional:
+            return None
+        raise
+    except OSError as error:
+        raise Refusal(f'{path}: cannot read policy without following symlinks') from error
+    with os.fdopen(fd) as stream:
+        check_trusted(os.fstat(stream.fileno()), str(path), directory=False)
+        return stream.read()

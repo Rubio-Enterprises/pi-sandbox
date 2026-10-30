@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pi_sandbox import Refusal, pack, profile
 from pi_sandbox.cli import message, split
-from pi_sandbox.config import Config, discover, resolve
+from pi_sandbox.config import Config, discover, layer_directories, load_layer, resolve
 from pi_sandbox.launch import preview, tool
 from pi_sandbox.paths import Paths, atomic_json, private_dir
 from pi_sandbox.platform import Platform
@@ -20,9 +20,11 @@ def validate(config: Config) -> None:
     resolve(config.paths, 'linux', config.layers)
     tool('nono')
     pack.require(config.paths)
-    profile.sync(config)
     private_dir(config.paths.launch_state)
-    with tempfile.TemporaryDirectory(prefix='validate.', dir=config.paths.launch_state) as name:
+    with (
+        profile.pinned(config),
+        tempfile.TemporaryDirectory(prefix='validate.', dir=config.paths.launch_state) as name,
+    ):
         path = Path(name) / 'profile.json'
         atomic_json(
             path, {'extends': profile.chain(config), 'meta': {'name': 'pi-sandbox-validation'}}
@@ -64,7 +66,8 @@ def doctor(config: Config, platform: Platform) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='pi-sandbox-ctl')
     parser.add_argument(
-        'command', choices=['setup', 'pack', 'layers', 'config', 'profile', 'validate', 'doctor']
+        'command',
+        choices=['setup', 'pack', 'layers', 'config', 'profile', 'validate', 'doctor', 'prune'],
     )
     parser.add_argument(
         '--json', action='store_true', help='machine-readable resolved configuration'
@@ -78,15 +81,13 @@ def main(argv: list[str] | None = None) -> int:
         platform = Platform.detect()
         if args.command == 'layers':
             failed = False
-            root = paths.root / 'layers'
-            if root.exists():
-                for directory in sorted(root.iterdir()):
+            directories = layer_directories(paths)
+            if directories:
+                for directory in directories:
                     try:
-                        # Discovery validates the same schema used by launches
-                        from pi_sandbox.config import load_layer
-
                         layer = load_layer(directory, paths)
-                        sys.stdout.write(f'{layer.name}\t{layer.path}\tvalid\n')
+                        status = 'valid' if layer is not None else 'empty, ignored'
+                        sys.stdout.write(f'{directory.name}\t{directory}\t{status}\n')
                     except Refusal as error:
                         sys.stdout.write(f'{directory.name}\t{directory}\t{error}\n')
                         failed = True
@@ -97,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == 'setup':
             pack.setup(paths)
             profile.sync(config)
+            profile.prune(config)
+        elif args.command == 'prune':
+            sys.stdout.write(f'pruned {profile.prune(config)} profiles\n')
         elif args.command == 'config':
             output = (
                 json.dumps(config.values, indent=2)

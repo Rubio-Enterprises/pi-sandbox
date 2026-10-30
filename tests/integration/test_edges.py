@@ -28,7 +28,10 @@ def test_no_layers_is_conservative(fixture, os_name):
     result = fixture.run(os_name, extra={'GH_TOKEN': 'human', 'DOCKER_HOST': 'unix:///host'})
     assert result.returncode == 0, result.stderr
     cap = fixture.capture()
-    assert cap['profile']['extends'] == ['pi-sandbox-base']
+    from pi_sandbox.config import Config
+    from pi_sandbox.profile import chain
+
+    assert cap['profile']['extends'] == chain(Config(fixture.paths))
     assert 'GH_TOKEN' not in cap['env'] and 'DOCKER_HOST' not in cap['env']
     assert 'Keychains' not in json.dumps(cap['profile']['filesystem']['bypass_protection'])
     assert 'Docker is not configured' in cap['notice']
@@ -118,12 +121,12 @@ def test_hook_timeout_refuses_and_never_creates_child(config, monkeypatch):
     from pi_sandbox import Refusal, hooks
     from pi_sandbox.platform import Platform
 
-    config.values['hooks'] = [{'name': 'timeout', 'command': ['hook']}]
+    config.values['hooks'] = [{'name': 'timeout', 'command': ['/bin/sh']}]
 
     def timeout(*args, **kwargs):
-        assert kwargs['timeout'] == 30
+        assert hooks.TIMEOUT == 30
         raise subprocess.TimeoutExpired(args[0], 30)
 
-    monkeypatch.setattr(hooks.subprocess, 'run', timeout)
+    monkeypatch.setattr(hooks, 'execute', timeout)
     with pytest.raises(Refusal, match='hook timeout refused'):
-        hooks.run(config, Platform('macos'), config.paths.home, config.paths.state)
+        hooks.run(config, Platform('macos'), config.paths.home, config.paths.state, writable=[])

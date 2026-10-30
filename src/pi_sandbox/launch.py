@@ -3,7 +3,7 @@ import shutil
 import signal
 import stat
 import subprocess
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,63 +123,134 @@ def grants(config: Config, platform: Platform, plan: Plan, *, github: bool, crea
         rw, ro = linux.git_grants(plan.git, create=create)
         result.rw += rw
         result.ro += ro
-    elif (socket := config.block('docker').get('socket')) and Path(socket).is_socket():
+    if (socket := config.block('docker').get('socket')) and Path(socket).is_socket():
         result.bypass.append(socket)
     return result
+
+
+def owned_directory(parent: int, name: str) -> int:
+    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        raise OSError(f'refusing cleanup of unowned or aliased directory: {name}')
+    os.chmod(name, stat.S_IMODE(info.st_mode) | 0o700, dir_fd=parent, follow_symlinks=False)
+    return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+
+
+def open_private_root(root: Path) -> int:
+    parent = os.open(root.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        return owned_directory(parent, root.name)
+    finally:
+        os.close(parent)
+
+
+def remove_entry(parent: int, name: str) -> None:
+    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if stat.S_ISDIR(info.st_mode):
+        fd = owned_directory(parent, name)
+        try:
+            for child_name in os.listdir(fd):
+                remove_entry(fd, child_name)
+        finally:
+            os.close(fd)
+        os.rmdir(name, dir_fd=parent)
+    else:
+        os.unlink(name, dir_fd=parent)
+
+
+def remove_private_tree(root: Path | None) -> None:
+    if root is None:
+        return
+    try:
+        fd = os.open(root.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            remove_entry(fd, root.name)
+        finally:
+            os.close(fd)
+    except FileNotFoundError:
+        pass
+
+
+def cleanup_step(action: Callable[[Path | None], None], root: Path | None) -> None:
+    try:
+        action(root)
+    except Exception as error:
+        message(f'cleanup failed for {root}: {error}')
 
 
 def cleanup_tmux(root: Path | None) -> None:
     if root is None:
         return
-    sockets = root / f'tmux-{os.getuid()}'
-    if (
-        root.is_dir()
-        and not root.is_symlink()
-        and sockets.is_dir()
-        and not sockets.is_symlink()
-        and shutil.which('tmux')
-    ):
-        for path in sorted(sockets.iterdir()):
+    try:
+        fd = open_private_root(root)
+        try:
             try:
-                info = path.lstat()
-                if stat.S_ISSOCK(info.st_mode) and info.st_nlink == 1:
-                    subprocess.run(
-                        ['tmux', '-S', str(path), 'kill-server'],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        check=False,
-                        timeout=10,
-                    )
-            except OSError, subprocess.TimeoutExpired:
-                continue
-    if root.is_symlink():
-        root.unlink(missing_ok=True)
-    else:
-        shutil.rmtree(root, ignore_errors=True)
+                directory = owned_directory(fd, f'tmux-{os.getuid()}')
+            except FileNotFoundError:
+                return
+            try:
+                names = sorted(os.listdir(directory))
+                if shutil.which('tmux'):
+                    for name in names:
+                        try:
+                            info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                            if stat.S_ISSOCK(info.st_mode) and info.st_nlink == 1:
+                                subprocess.run(
+                                    [
+                                        'tmux',
+                                        '-S',
+                                        str(root / f'tmux-{os.getuid()}' / name),
+                                        'kill-server',
+                                    ],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    check=False,
+                                    timeout=10,
+                                )
+                        except (OSError, subprocess.TimeoutExpired) as error:
+                            message(f'tmux cleanup failed: {error}')
+            finally:
+                os.close(directory)
+        finally:
+            os.close(fd)
+    except OSError as error:
+        message(f'cannot enumerate private tmux sockets: {error}')
+    finally:
+        remove_private_tree(root)
 
 
 def cleanup_browser(root: Path | None) -> None:
     if root is None:
         return
-    sockets = [*root.glob('*.sock'), *root.glob('namespaces/*/run/*.sock')]
-    if sockets and shutil.which('agent-browser'):
-        env = dict(os.environ, AGENT_BROWSER_SOCKET_DIR=str(root))
-        namespaces = [None, *sorted(p.name for p in (root / 'namespaces').glob('*') if p.is_dir())]
-        for namespace in namespaces:
-            if namespace is not None:
-                env['AGENT_BROWSER_NAMESPACE'] = namespace
-            try:
-                subprocess.run(
-                    ['agent-browser', 'close', '--all'],
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=15,
-                )
-            except OSError, subprocess.TimeoutExpired:
-                continue
-    shutil.rmtree(root, ignore_errors=True)
+    try:
+        fd = open_private_root(root)
+        os.close(fd)
+        sockets = [*root.glob('*.sock'), *root.glob('namespaces/*/run/*.sock')]
+        if sockets and shutil.which('agent-browser'):
+            env = dict(os.environ, AGENT_BROWSER_SOCKET_DIR=str(root))
+            env.pop('AGENT_BROWSER_NAMESPACE', None)
+            namespaces = [
+                None,
+                *sorted(p.name for p in (root / 'namespaces').glob('*') if p.is_dir()),
+            ]
+            for namespace in namespaces:
+                if namespace is not None:
+                    env['AGENT_BROWSER_NAMESPACE'] = namespace
+                try:
+                    subprocess.run(
+                        ['agent-browser', 'close', '--all'],
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                        timeout=15,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    message(f'browser cleanup failed: {error}')
+    except OSError as error:
+        message(f'cannot enumerate private browser sockets: {error}')
+    finally:
+        remove_private_tree(root)
 
 
 @contextmanager
@@ -214,7 +285,11 @@ def child(argv: list[str], env: dict[str, str], directory: Path) -> int:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGHUP, forward)
     signal.signal(signal.SIGTERM, forward)
-    process = subprocess.Popen(argv, env=env, cwd=directory)
+
+    def reset_sigint() -> None:
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+    process = subprocess.Popen(argv, env=env, cwd=directory, preexec_fn=reset_sigint)
     if received:
         process.send_signal(received)
     status = process.wait()
@@ -230,7 +305,6 @@ def launch(args: Arguments, platform: Platform) -> int:
     config = resolve(paths, platform.os)
     pack.version()
     pack.require(paths)
-    profile.sync(config)
     planned = plan(config, platform, args)
     ident = identity(planned.workdir)
     if not all(ident):
@@ -238,26 +312,22 @@ def launch(args: Arguments, platform: Platform) -> int:
             'Git user.name/user.email unresolved for workdir; '
             'launching anyway (commits will fail until set)'
         )
-    creds = credentials.load(config)
-    for line in creds.messages:
-        message(line)
     launch_dir: Path | None = None
     browser: Path | None = None
     tmux: Path | None = None
+    pins: list[int] = []
     with signals():
         try:
             launch_dir = temporary_dir(paths.launch_state, 'launch.')
+            pins = profile.sync(config, pin=True)
             artifacts = temporary_dir(paths.state / 'agent-sandbox/artifacts', 'run.')
             private_dir(artifacts / 'screenshots')
             private_dir(paths.private_cache)
             for path in planned.create:
                 private_dir(path)
-            current = grants(config, platform, planned, github=bool(creds.github), create=True)
-            extra_rules, extra_notices = hooks.run(config, platform, planned.workdir, launch_dir)
-            credentials.write_files(launch_dir, creds, platform.os)
             browser = temporary_dir(Path('/tmp'), 'sab.')
             tmux = temporary_dir(Path('/tmp'), 'pst.')
-            current.rw += [
+            private_rw = [
                 str(launch_dir / 'gh'),
                 str(launch_dir / 'docker'),
                 str(paths.private_cache),
@@ -265,7 +335,36 @@ def launch(args: Arguments, platform: Platform) -> int:
                 str(tmux),
                 str(artifacts),
             ]
+            candidate = grants(config, platform, planned, github=True, create=True)
+            candidate.rw += private_rw
+            candidate.ro.append(str(launch_dir))
+            writable = list(candidate.rw)
+            if any(
+                platform.os in hook.get('platforms', ['macos', 'linux']) for hook in config.hooks
+            ):
+                check_path = launch_dir / 'hook-profile.json'
+                atomic_json(
+                    check_path,
+                    profile.assemble(
+                        config, platform, candidate, environment.Environment({}, [], {}), []
+                    ),
+                )
+                try:
+                    writable += profile.writable_grants(check_path, planned.workdir)
+                finally:
+                    check_path.unlink(missing_ok=True)
+            if platform.os == 'macos' and planned.git is not None:
+                writable.append(str(planned.git.common))
+            extra_rules, extra_notices = hooks.run(
+                config, platform, planned.workdir, launch_dir, writable=writable
+            )
+            creds = credentials.load(config)
+            for line in creds.messages:
+                message(line)
+            current = grants(config, platform, planned, github=bool(creds.github), create=False)
+            current.rw += private_rw
             current.ro.append(str(launch_dir))
+            credentials.write_files(launch_dir, creds, platform.os)
             env = environment.build(
                 config,
                 platform,
@@ -330,10 +429,16 @@ def launch(args: Arguments, platform: Platform) -> int:
         finally:
             for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
                 signal.signal(sig, signal.SIG_IGN)
-            cleanup_tmux(tmux)
-            cleanup_browser(browser)
-            if launch_dir is not None:
-                shutil.rmtree(launch_dir, ignore_errors=True)
+            try:
+                cleanup_step(cleanup_tmux, tmux)
+            finally:
+                try:
+                    cleanup_step(cleanup_browser, browser)
+                finally:
+                    try:
+                        cleanup_step(remove_private_tree, launch_dir)
+                    finally:
+                        profile.release(pins)
 
 
 def preview(config: Config, platform: Platform, args: Arguments) -> dict[str, Any]:

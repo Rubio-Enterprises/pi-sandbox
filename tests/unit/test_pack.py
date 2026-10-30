@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 
@@ -49,7 +50,20 @@ def test_setup_pulls_only_when_missing(paths, monkeypatch):
         if argv[1] == 'pull':
             file(
                 paths.nono / 'packages/lockfile.json',
-                '{"packages":{"nolabs-ai/pi":{"version":"0.2.2"}}}',
+                json.dumps(
+                    {
+                        'packages': {
+                            'nolabs-ai/pi': {
+                                'version': '0.2.2',
+                                'artifacts': {
+                                    'profiles/pi.json': {
+                                        'sha256': hashlib.sha256(b'{}').hexdigest()
+                                    }
+                                },
+                            }
+                        }
+                    }
+                ),
             )
             file(pack.directory(paths) / 'profiles/pi.json', '{}')
         return subprocess.CompletedProcess(argv, 0, 'nono 0.80.0', '')

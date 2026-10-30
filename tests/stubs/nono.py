@@ -1,7 +1,6 @@
 import fnmatch
 import json
 import os
-import signal
 import socket
 import sys
 from pathlib import Path
@@ -24,7 +23,34 @@ if args[:2] == ['profile', 'show']:
             if os.environ.get('TEST_DROP_DENY')
             else [{'path': str(Path.home() / 'Library/Keychains')}, {'path': '/Library/Keychains'}]
         )
-        print(json.dumps({'filesystem': {'deny': deny}}))
+        p = json.loads(Path(args[2]).read_text())
+        grants = []
+        root = (
+            Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'nono/profiles'
+        )
+
+        def collect(value):
+            parents = value.get('extends', [])
+            if isinstance(parents, str):
+                parents = [parents]
+            for name in parents:
+                source = root / (name + '.json')
+                if source.is_file():
+                    collect(json.loads(source.read_text()))
+            for block in (value, *value.get('platform_overrides', {}).values()):
+                for key in ('allow', 'write', 'allow_file', 'write_file'):
+                    for path in block.get('filesystem', {}).get(key, []):
+                        if path.startswith('@git:'):
+                            continue
+                        path = os.path.expandvars(path).replace('~/', str(Path.home()) + '/')
+                        grants.append({'path': path, 'access': 'readwrite', 'type': 'directory'})
+
+        collect(p)
+        grants += [
+            {'path': str(Path.home() / '.pi'), 'access': 'readwrite'},
+            {'path': str(Path.home() / '.config/nono/profile-drafts'), 'access': 'readwrite'},
+        ]
+        print(json.dumps({'filesystem': {'deny': deny, 'grants': grants}}))
     else:
         p = json.loads(Path(args[2]).read_text())
         if os.environ.get('TEST_BYPASS'):
@@ -91,5 +117,4 @@ elif kind == 'plain':
     (browser / 'not-a-socket.txt').touch()
 Path(env['AGENT_BROWSER_SCREENSHOT_DIR'], 'fixture.png').touch()
 env.update({k: v for k, v in os.environ.items() if k.startswith('TEST_')})
-signal.signal(signal.SIGINT, signal.SIG_DFL)
 os.execvpe('pi', ['pi', *args[args.index('--') + 2 :]], env)

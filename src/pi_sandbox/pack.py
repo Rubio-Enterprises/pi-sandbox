@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import subprocess
@@ -37,6 +38,21 @@ def require(paths: Paths) -> None:
         or not (directory(paths) / 'profiles/pi.json').is_file()
     ):
         raise Refusal(f'pinned pack {REFERENCE} is missing; run pi-sandbox-ctl setup')
+    try:
+        lock = json.loads((paths.nono / 'packages/lockfile.json').read_bytes())
+        digest = lock['packages']['nolabs-ai/pi']['artifacts']['profiles/pi.json']['sha256']
+        content = (directory(paths) / 'profiles/pi.json').read_bytes()
+        if (
+            not isinstance(digest, str)
+            or not re.fullmatch(r'[0-9a-f]{64}', digest)
+            or hashlib.sha256(content).hexdigest() != digest
+            or not isinstance(json.loads(content), dict)
+        ):
+            raise ValueError('invalid profile digest or content')
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise Refusal(
+            f'pinned pack {REFERENCE} integrity check failed; repair it with nono before launching'
+        ) from error
 
 
 def setup(paths: Paths) -> None:

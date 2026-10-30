@@ -34,11 +34,10 @@ here.
 
 ```text
 nolabs-ai/pi                    official signed nono pack (pinned by the engine)
-  └─ pi-sandbox-base            engine-shipped static profile (src/pi_sandbox/data/base-profile.json)
-       ├─ pi-sandbox-layer-<a>  layer profile.json, installed by the engine at launch
-       ├─ pi-sandbox-layer-<b>
-       └─ <launch>/profile.json per-launch profile written by the engine:
-                                extends ["pi-sandbox-base", "pi-sandbox-layer-<a>", ...]
+  └─ pi-sandbox-base-<sha12>          engine-shipped static profile
+       ├─ pi-sandbox-layer-<a>-<sha12> layer profile.json, installed immutably
+       ├─ pi-sandbox-layer-<b>-<sha12>
+       └─ <launch>/profile.json       per-launch profile extends the addressed names
 ```
 
 nono resolves the chain: `extends` takes a list of profile names merged left to right, each
@@ -110,13 +109,14 @@ covering the workdir or Git metadata (macOS); Keychain preflight failure (macOS,
 
 | Subcommand | Behaviour |
 | --- | --- |
-| `setup` | Pull the pinned nono pack when absent or at another version; sync layer profiles; set the pack's Pi settings entry to load no skills outside the sandbox. Idempotent. |
+| `setup` | Pull/verify the pinned pack; install immutable profiles; set the pack's Pi skill filter; prune unreferenced profiles older than 24 hours. Idempotent. |
 | `pack` | Print the pinned pack reference (`nolabs-ai/pi@X.Y.Z`). |
-| `layers` | List discovered layers in order with their paths and any validation errors. |
+| `layers` | List layers, validation errors, and empty directories marked `empty, ignored`. |
 | `config [--json]` | Print the resolved configuration for this platform. |
 | `profile [--workdir=DIR] [grant flags]` | Assemble and print the per-launch profile without launching or reading credentials (dry run; token-dependent parts shown as if tokenless). |
 | `validate` | Validate every layer (schema, paths, profile.json rules) and resolve the chain with `nono profile show`; non-zero on any error. |
-| `doctor` | `validate` plus nono version, pack version, Linux kernel/Landlock checks. |
+| `doctor` | `validate` plus nono version, pack version/integrity, Linux kernel/Landlock checks. |
+| `prune` | Remove unreferenced engine profiles older than 24 hours, retaining current and pinned profiles. |
 
 ## Locations
 
@@ -129,11 +129,15 @@ covering the workdir or Git metadata (macOS); Keychain preflight failure (macOS,
 | Private caches | `${XDG_CACHE_HOME:-$HOME/.cache}/pi-sandbox` |
 | Screenshot artifacts | `${XDG_STATE_HOME:-$HOME/.local/state}/agent-sandbox/artifacts/run.XXXXXXXX/screenshots` (retained) |
 | nono config | `${XDG_CONFIG_HOME:-$HOME/.config}/nono` |
-| Installed layer profiles | `<nono config>/profiles/pi-sandbox-base.json`, `pi-sandbox-layer-<name>.json` |
+| Installed layer profiles | `<nono config>/profiles/pi-sandbox-base-<sha12>.json`, `pi-sandbox-layer-<name>-<sha12>.json` |
 
 The whole engine config root is denied inside the sandbox (read and write). Layers are applied
 in lexical order of their directory names; directory names match `[0-9]{2}-[a-z0-9][a-z0-9-]*`
-and the profile name is `pi-sandbox-layer-<directory name>`.
+and the installed profile name is `pi-sandbox-layer-<directory name>-<sha12>`.
+Layer directories, `layers/`, and policy files must be user-owned, not symlinks,
+and not group/world-writable. Descriptor-relative opens use `O_NOFOLLOW`; file
+type, ownership, and permissions are checked on the opened inode. Empty layer
+directories are ignored; any nonempty directory still requires `layer.toml`.
 
 ## Layer format (`layer.toml`, schema 1)
 
@@ -212,9 +216,23 @@ later layer can add `set` entries to an earlier slot (for example a per-user ema
 
 **`profile.json`.** A nono profile fragment. The engine rejects `extends`,
 `unsafe_macos_seatbelt_rules` (raw rules carry absolute paths: use hooks), `workdir`, and
-`meta.name` values other than the derived profile name; it injects `meta.name` when absent. On
-every launch (and on `setup`/`validate`) the engine writes the installed copy atomically when its
-content changed and removes `pi-sandbox-layer-*.json` profiles that no longer have a layer.
+`meta.name` values other than the logical name `pi-sandbox-layer-<directory name>`;
+it injects that logical name when absent.
+
+Installed filenames use the first 12 hex characters of SHA-256 of the exact stored
+UTF-8 JSON bytes (sorted keys, two-space indent, trailing newline). Metadata keeps its
+logical name: hashing bytes that themselves contain the resulting hash would be circular.
+nono resolves the chain by filename. Base and layer profiles are published complete via
+exclusive hard-link creation and never overwritten. Existing content must match exactly.
+Launch/validate pin their profiles with shared advisory locks on read-only file
+descriptors; install/pin and pruning operations also share a short-lived store lock.
+Pruning requires a nonblocking exclusive lock on each candidate. This prevents another
+config root or prune from replacing or removing an in-flight chain, even across XDG
+state roots/filesystems. No writable hard-link aliases or state-file pins are created,
+and process exit automatically releases locks. Launch never deletes installed profiles.
+Only `setup` and explicit `prune` remove unreferenced `pi-sandbox-*.json` files,
+preserving the current chain, actively locked profiles, and all profiles modified in
+the last 24 hours.
 
 ## Built-in integrations
 
@@ -265,14 +283,25 @@ Exit 0 with stdout either empty or a JSON object
 `{"seatbelt_rules": ["(deny …)"], "notice": ["- …"]}`; `seatbelt_rules` is accepted only on
 macOS and must be a list of strings starting with `(`. Any other exit refuses the launch with
 `pi-sandbox: hook <name> refused the launch` followed by the hook's stderr. A hook has a
-30-second timeout.
+30-second timeout. Each hook runs in its own session/process group; timeout,
+interruption, or excessive output terminates only that group (TERM, then KILL),
+and the direct child is waited/reaped. stdout and stderr are each capped at 1 MiB.
+The resolved executable, including symlink targets and PATH lookup, must lie outside
+every RW grant. Checks include potential token-enabled integration grants before
+credentials are read, plus macOS's common-Git grant and private runtime roots.
+A provisional credential-free profile is resolved with nono's manifest format to
+include RW grants from native layer fragments, the official pack, and groups.
+Unresolvable/malformed grant data refuses launch. Executable lookup preserves the
+invoked path/argv identity (notably virtual environments) while validating both that
+path and its canonical target.
+Hook argv/inline programs are trusted policy, not inferred or rewritten by the engine.
 
 ## Launch sequence
 
 1. Refuse when `NONO_CAP_FILE` is set. Split arguments. Resolve `pi` (absolute path), `nono`,
    `git`. Resolve the workdir (`~`, absolute, real path) and apply the workdir refusals.
 2. Load and validate layers; resolve configuration for the current OS. Check the nono version
-   and the pinned pack. Sync installed layer profiles.
+   and the pinned pack's integrity. Compute the content-addressed profile chain.
 3. **Linux preflight** (Linux only): kernel `>= 6.12` (else refuse with the WSL update hint); on
    WSL (`/proc/version` contains `microsoft`, case-insensitive) refuse any grant under
    `/mnt/<drive>`. For a Git workdir: refuse the main checkout (`git-dir == common-dir`), refuse a
@@ -288,11 +317,13 @@ macOS and must be a list of strings starting with `(`. Any other exit refuses th
    RW, `<common>` and the worktree root RO. macOS adds the nono tokens `@git:common-dir` (allow)
    and `@git:worktree` (read). macOS also grants `$XDG_STATE_HOME/mise` RW when it differs from
    the default.
-5. Read credentials and run env-slot commands; resolve the Git identity; run hooks.
-6. Create launch state: launch dir, artifacts dir, runtime dirs, `gh`/`docker`/`gitconfig`,
-   the agent-browser socket root `/tmp/sab.XXXXXXXX` and tmux root `/tmp/pst.XXXXXXXX`
-   (both 0700, real paths), and grant them (launch dir RO; its `gh`, `docker`, the cache, the
-   two roots, artifacts and runtime dirs RW).
+5. Resolve Git identity. Allocate the launch, artifact, runtime, browser
+   (`/tmp/sab.XXXXXXXX`) and tmux (`/tmp/pst.XXXXXXXX`) directories (0700, real paths).
+   Install and pin the immutable profile chain. Validate hook executable locations and
+   run hooks **before any credential file or slot command is read/executed**.
+6. Read credentials and run env-slot commands; finish token-dependent grants; write
+   `gh`/`docker`/`gitconfig`. Grant the launch dir RO; grant its `gh`, `docker`,
+   private cache, socket roots, artifacts and runtime dirs RW.
 7. macOS raw rules, in this order: Git rules for the workdir, remote port denies, hook rules,
    host rules, then static floors (below, preserving their internal order). Later Seatbelt
    rules win: the static floors must remain last.
@@ -314,7 +345,7 @@ macOS and must be a list of strings starting with `(`. Any other exit refuses th
 **Docker.** With `docker.socket` set: `DOCKER_HOST=unix://<socket>`,
 `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`,
 `JAVA_TOOL_OPTIONS=-Ddocker.host=unix://<socket>`, `DOCKER_CONFIG=<launch>/docker`; macOS adds a
-`unix_socket` grant and, when the socket exists, a `bypass_protection` entry. `DOCKER_CONTEXT`,
+`unix_socket` grant. On both platforms an existing socket receives a `bypass_protection` entry. `DOCKER_CONTEXT`,
 `DOCKER_TLS_VERIFY` and `DOCKER_CERT_PATH` are unset. Without it, `DOCKER_CONFIG` is still
 private and the notice says Docker is not configured.
 
@@ -424,6 +455,11 @@ ignores `SIGINT` (the terminal delivers it to Pi), and on `SIGHUP`/`SIGTERM` it 
 signal to the child and waits. Cleanup always runs, ignoring further signals, then the launcher
 exits with the child's status or `128+N`. Tmux cleanup runs `tmux -S <socket> kill-server` for
 each real socket (not a symlink, link count 1) in `<root>/tmux-<uid>/`, never by server name.
+The single-threaded launcher resets SIGINT to default in the child before exec;
+the parent's ignored disposition must not be inherited. Cleanup phases have
+independent finalizers and errors do not replace the child's status. Owned private
+directory permissions are recovered descriptor-relatively without following symlinks,
+including mode-000 tmux directories.
 
 ## nono pack
 
@@ -433,6 +469,17 @@ pulls the pin with `nono pull -s`, then sets `"skills": []` on the pack's entry 
 skill — which asserts a nono launch — never loads outside the sandbox; the wrapper loads it
 inside. `setup` never removes other packs.
 
+nono 0.80's lockfile records the installed `profiles/pi.json` artifact's SHA-256
+separately from the pack version. The retained `.nono-trust.bundle` maps signed
+`policy.json` to that installed path with the same digest. Launch and setup verify the
+profile bytes against the lockfile digest; missing/malformed metadata, a mismatch,
+or malformed profile JSON is a refusal. The profile's own `meta.version` is not the
+pack version. This is local integrity checking of nono's installed metadata, not a
+replacement signature verifier. `nono trust verify` verifies instruction-file bundles
+against a project trust policy, not the installed-pack layout; no suitable pack
+reverification command is exposed in 0.80. Signature/provenance verification remains
+nono pull's responsibility; corruption is repaired through nono or refused.
+
 ## Implementation decisions
 
 - Dry-run `profile` uses stable `launch.preview` and socket/artifact placeholders,
@@ -441,7 +488,8 @@ inside. `setup` never removes other packs.
   `validate` syncs profiles and uses an ephemeral resolver profile; it never launches Pi.
 - Hook stdin requires a real launch directory. It is allocated before hooks run and
   removed on refusal. Scratch/runtime directories are prepared first; retained artifacts
-  may therefore exist even when a later hook or Keychain preflight refuses.
+  may therefore exist even when a later hook or Keychain preflight refuses. Credential
+  reads/commands occur only after all hooks accept.
 - A failed credential command discards partial stdout and follows the slot's missing
   behavior. Slot `set` names, as well as its secret name, are cleared from inherited
   environment and protected from `SANDBOX_ENV_PASS` to prevent stale companion values.
@@ -449,6 +497,13 @@ inside. `setup` never removes other packs.
 - Missing-tool refusals name `nono` or `git` individually. There is no jq dependency.
   Python's JSON/TOML/path/process APIs replace shell+jq plumbing; nono still resolves
   the native policy chain and applies confinement.
+- Native manifest resolution is reused for hook grant checks rather than duplicating
+  nono's inheritance, group, platform, and write-grant semantics in a custom resolver.
+  The bounded hook supervisor uses selectors because `subprocess.run/communicate`
+  cannot cap output or tear down an owned descendant group by themselves. Shared
+  file locks pin profiles without requiring config/state to share a filesystem or
+  introducing writable hard-link aliases; hard links are used only for atomic publish
+  inside the protected profile store.
 - The nono lockfile and installed profile must both confirm the pinned pack.
   Setup preserves unrelated pack entries and changes only this pack's skill filter.
 - Private temporary roots use exclusive 0700 mkdir with eight cryptographically random

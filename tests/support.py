@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -130,7 +131,24 @@ def make_fixture(root):
     fixture.git('commit', '-q', '--allow-empty', '-m', 'fixture')
     fixture.git('remote', 'add', 'origin', 'https://github.com/example/app.git')
     fixture.git('worktree', 'add', '-q', '-b', 'feature', str(fixture.linked))
-    file(paths.nono / 'packages/lockfile.json', '{"packages":{"nolabs-ai/pi":{"version":"0.2.2"}}}')
+    file(
+        paths.nono / 'packages/lockfile.json',
+        json.dumps(
+            {
+                'packages': {
+                    'nolabs-ai/pi': {
+                        'version': '0.2.2',
+                        'artifacts': {
+                            'profiles/pi.json': {
+                                'sha256': hashlib.sha256(b'{}').hexdigest(),
+                                'type': 'profile',
+                            }
+                        },
+                    }
+                }
+            }
+        ),
+    )
     file(paths.nono / 'packages/nolabs-ai/pi/profiles/pi.json', '{}')
     file(paths.nono / 'packages/nolabs-ai/pi/package.json', '{"pi":{"skills":["guides","absent"]}}')
     (paths.nono / 'packages/nolabs-ai/pi/guides').mkdir()

@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from pi_sandbox import Refusal
-from pi_sandbox.paths import Paths
+from pi_sandbox.paths import Paths, content_name, trusted_directory, trusted_text
 from pi_sandbox.platform import OS
 
 Table = dict[str, Any]
@@ -238,7 +239,7 @@ class Layer:
 
     @property
     def profile_name(self) -> str:
-        return 'pi-sandbox-layer-' + self.name
+        return content_name('pi-sandbox-layer-' + self.name, self.profile)
 
 
 @dataclass
@@ -270,34 +271,57 @@ class Config:
         return cast(list[Table], self.values.get('hooks', []))
 
 
-def discover(paths: Paths) -> list[Layer]:
+def layer_directories(paths: Paths) -> list[Path]:
     root = paths.root / 'layers'
-    if not root.exists():
+    try:
+        with trusted_directory(root) as fd:
+            return [root / name for name in sorted(os.listdir(fd))]
+    except FileNotFoundError:
         return []
-    return [load_layer(directory, paths) for directory in sorted(root.iterdir())]
 
 
-def load_layer(directory: Path, paths: Paths) -> Layer:
-    if not directory.is_dir():
-        raise Refusal(f'{directory}: layer must be a directory')
+def discover(paths: Paths) -> list[Layer]:
+    result: list[Layer] = []
+    root = paths.root / 'layers'
+    try:
+        with trusted_directory(root) as fd:
+            for name in sorted(os.listdir(fd)):
+                if layer := _load_layer(root / name, paths, fd):
+                    result.append(layer)
+    except FileNotFoundError as error:
+        if error.filename == str(root):
+            return []
+        raise Refusal(f'{root}: cannot load policy: {error}') from error
+    return result
+
+
+def load_layer(directory: Path, paths: Paths) -> Layer | None:
+    with trusted_directory(paths.root / 'layers') as fd:
+        return _load_layer(directory, paths, fd)
+
+
+def _load_layer(directory: Path, paths: Paths, parent: int) -> Layer | None:
     if not LAYER_NAME.fullmatch(directory.name):
         raise Refusal(f'{directory}: invalid layer directory name')
-    file = directory / 'layer.toml'
     try:
-        value = tomllib.loads(file.read_text())
-        settings = validate_section(value, paths, str(file), root=True)
-        profile_path = directory / 'profile.json'
-        profile = (
-            validate_profile(
-                json.loads(profile_path.read_text()),
-                'pi-sandbox-layer-' + directory.name,
-                str(profile_path),
+        with trusted_directory(directory.name, parent=parent) as fd:
+            if not os.listdir(fd):
+                return None
+            source = trusted_text('layer.toml', parent=fd)
+            value = tomllib.loads(source or '')
+            settings = validate_section(value, paths, str(directory / 'layer.toml'), root=True)
+            fragment = trusted_text('profile.json', parent=fd, optional=True)
+            profile = (
+                validate_profile(
+                    json.loads(fragment),
+                    'pi-sandbox-layer-' + directory.name,
+                    str(directory / 'profile.json'),
+                )
+                if fragment is not None
+                else None
             )
-            if profile_path.exists()
-            else None
-        )
     except (OSError, ValueError) as error:
-        raise Refusal(f'{file}: cannot load layer: {error}') from error
+        raise Refusal(f'{directory}: cannot load layer: {error}') from error
     return Layer(directory.name, directory, settings, profile)
 
 

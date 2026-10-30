@@ -168,13 +168,13 @@ def test_hook_output_protocol(fixture, output, os, ok):
     config = resolve(fixture.paths, os)
     config.values['hooks'] = [{'name': 'fixture', 'command': [str(command)]}]
     if ok:
-        rules, notices = run(config, Platform(os), fixture.repo, fixture.out)
+        rules, notices = run(config, Platform(os), fixture.repo, fixture.out, writable=[])
         if output.strip():
             assert rules == json.loads(output).get('seatbelt_rules', [])
             assert notices == json.loads(output).get('notice', [])
     else:
         with pytest.raises(Refusal, match='hook fixture refused'):
-            run(config, Platform(os), fixture.repo, fixture.out)
+            run(config, Platform(os), fixture.repo, fixture.out, writable=[])
 
 
 def test_hook_input_exit_and_stderr(fixture):
@@ -186,7 +186,7 @@ def test_hook_input_exit_and_stderr(fixture):
     config = resolve(fixture.paths, 'macos')
     config.values['hooks'] = [{'name': 'fixture', 'command': [str(command)]}]
     with pytest.raises(Refusal, match='specific-reason'):
-        run(config, Platform('macos'), fixture.repo, fixture.out)
+        run(config, Platform('macos'), fixture.repo, fixture.out, writable=[])
     assert json.loads((fixture.repo / 'input.json').read_text()) == {
         'schema': 1,
         'os': 'macos',

@@ -122,12 +122,12 @@ def test_invalid_paths(paths, value):
         paths.expand(value)
 
 
-def test_discovery_profile_sync_and_stale_removal(fixture):
+def test_discovery_profile_sync_preserves_existing_profiles(fixture):
     config = resolve(fixture.paths, 'macos')
     assert [layer.name for layer in config.layers] == ['10-org', '50-user', '90-host']
     sync(config)
     root = fixture.paths.nono / 'profiles'
-    installed = root / 'pi-sandbox-layer-50-user.json'
+    installed = root / (config.layers[1].profile_name + '.json')
     assert json.loads(installed.read_text())['meta']['name'] == 'pi-sandbox-layer-50-user'
     before = installed.stat().st_mtime_ns
     sync(config)
@@ -135,7 +135,7 @@ def test_discovery_profile_sync_and_stale_removal(fixture):
     (root / 'pi-sandbox-layer-00-stale.json').write_text('{}')
     (root / 'unrelated.json').write_text('{}')
     sync(config)
-    assert not (root / 'pi-sandbox-layer-00-stale.json').exists()
+    assert (root / 'pi-sandbox-layer-00-stale.json').exists()
     assert (root / 'unrelated.json').exists()
 
 
