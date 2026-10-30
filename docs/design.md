@@ -144,11 +144,11 @@ defaults) and must be absolute after expansion.
 ```toml
 schema = 1
 
-[layer]
-description = "Example organisation defaults"
-
 # Built-in integrations to enable (see Integrations)
 integrations = ["credential-stores", "onepassword", "cloud-credentials", "keychain", "agent-mcp"]
+
+[layer]
+description = "Example organisation defaults"
 
 [grants]
 ro_dirs = ["~/.agents"]              # read-only, skipped when absent
@@ -425,6 +425,32 @@ pulls the pin with `nono pull -s`, then sets `"skills": []` on the pack's entry 
 `~/.pi/agent/settings.json` `packages` (matched by its `source`), so the pack's `nono-sandbox`
 skill — which asserts a nono launch — never loads outside the sandbox; the wrapper loads it
 inside. `setup` never removes other packs.
+
+## Implementation decisions
+
+- Dry-run `profile` uses stable `launch.preview` and socket/artifact placeholders,
+  does not create directories, and reads neither credentials nor Git identity.
+  It does not run hooks: arbitrary outside-sandbox commands are not a safe preview.
+  `validate` syncs profiles and uses an ephemeral resolver profile; it never launches Pi.
+- Hook stdin requires a real launch directory. It is allocated before hooks run and
+  removed on refusal. Scratch/runtime directories are prepared first; retained artifacts
+  may therefore exist even when a later hook or Keychain preflight refuses.
+- A failed credential command discards partial stdout and follows the slot's missing
+  behavior. Slot `set` names, as well as its secret name, are cleared from inherited
+  environment and protected from `SANDBOX_ENV_PASS` to prevent stale companion values.
+  GitHub and inference bridge names cannot be restored from that passthrough either.
+- Missing-tool refusals name `nono` or `git` individually. There is no jq dependency.
+  Python's JSON/TOML/path/process APIs replace shell+jq plumbing; nono still resolves
+  the native policy chain and applies confinement.
+- The nono lockfile and installed profile must both confirm the pinned pack.
+  Setup preserves unrelated pack entries and changes only this pack's skill filter.
+- The baseline Seatbelt floor retains default configuration paths and protects XDG
+  configuration overrides too. Hooks add rules only between port rules and host floors.
+- Linux checks the kernel floor before launch; `doctor` additionally queries Landlock's
+  ABI. nono performs the actual platform confinement checks.
+- Tests select OS/kernel/WSL through a Python entry point shipped only under `tests/`.
+  No environment variable relaxes a production preflight. CI excludes the live marker;
+  normal local `mise run test` includes it.
 
 ## Testing
 

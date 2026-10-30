@@ -9,3 +9,8 @@
 # `extend-exclude` add path entries, and scalars such as `target-version`
 # override.
 extend = ".standards-config/config/ruff.toml"
+target-version = "py314"
+
+[lint.extend-per-file-ignores]
+"src/pi_sandbox/*.py" = ["S603", "S607"]  # Tools are intentionally resolved through PATH
+"src/pi_sandbox/launch.py" = ["S108"]  # mkdtemp uses 0700 short roots for Unix socket limits

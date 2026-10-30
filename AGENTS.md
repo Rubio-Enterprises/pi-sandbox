@@ -1,7 +1,14 @@
 # Agent context
 
-This repo follows Rubio-Enterprises standards. Run `/audit-standards` from a Claude Code session to check conformance, or `/onboard-repo` for greenfield setup.
+Read [docs/design.md](docs/design.md) before changing launch behavior; it is the
+contract. Runtime dependencies are standard-library only. Keep user/host policy
+in layers and examples generic.
 
-Repo-specific context (in-progress migrations, gotchas, agent guidance):
+Use `mise tasks` for gates. `lint` includes strict pyright; `test` includes
+real-nono tests when available. Platform injection lives only in
+`tests/entry.py`; the shipped CLI must never read test override variables.
 
-<!-- Fill in below as needed. -->
+Run probes only in isolated fixture HOME/XDG roots. Live fixtures belong under
+the XDG cache directory's `pi-sandbox-tests/`, never the system temp directory.
+Use synthetic credentials and sockets; never query a real Keychain or token.
+Preserve the exact Seatbelt rule order and explicit-socket tmux cleanup.
