@@ -1,0 +1,19 @@
+schema = 1
+integrations = ["agent-mcp"]
+
+[layer]
+description = "Example shared policy"
+
+[credentials.env.service]
+file = "service.token"
+env = "EXAMPLE_SERVICE_TOKEN"
+set = { EXAMPLE_SERVICE_URL = "https://service.example" }
+missing = "Example service off: no token at {path}"
+notice = "- The example service is read-only; ask the user to make changes."
+
+[env]
+unset = ["EXAMPLE_ADMIN_TOKEN"]
+never_pass = ["EXAMPLE_*"]
+
+[pi]
+exclude_tools = ["mcp__example__delete_*"]
