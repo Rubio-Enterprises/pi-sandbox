@@ -3,6 +3,7 @@ import os
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -39,6 +40,22 @@ def executable(command: list[str], workdir: Path, writable: list[str]) -> list[s
         for grant in writable
     ):
         raise Refusal(f'hook executable lies in a read-write grant: {located}')
+    fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise Refusal(f'hook executable must be a regular file: {located}')
+        if info.st_nlink != 1:
+            readonly_system = (
+                info.st_uid == 0
+                and info.st_uid != os.geteuid()
+                and info.st_nlink > 1
+                and not os.access(resolved, os.W_OK, effective_ids=True)
+            )
+            if not readonly_system:
+                raise Refusal(f'hook executable must have exactly one hard link: {located}')
+    finally:
+        os.close(fd)
     return [str(located), *command[1:]]
 
 

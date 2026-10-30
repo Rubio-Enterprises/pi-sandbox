@@ -137,6 +137,8 @@ def check_trusted(info: os.stat_result, location: str, *, directory: bool) -> No
         )
     if info.st_mode & 0o022:
         raise Refusal(f'{location}: policy must not be group/world-writable')
+    if not directory and info.st_nlink != 1:
+        raise Refusal(f'{location}: policy must have exactly one hard link')
 
 
 @contextmanager

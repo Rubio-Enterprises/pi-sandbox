@@ -136,8 +136,10 @@ in lexical order of their directory names; directory names match `[0-9]{2}-[a-z0
 and the installed profile name is `pi-sandbox-layer-<directory name>-<sha12>`.
 Layer directories, `layers/`, and policy files must be user-owned, not symlinks,
 and not group/world-writable. Descriptor-relative opens use `O_NOFOLLOW`; file
-type, ownership, and permissions are checked on the opened inode. Empty layer
-directories are ignored; any nonempty directory still requires `layer.toml`.
+type, ownership, permissions, and (for files) `st_nlink == 1` are checked on the
+opened inode before TOML/JSON parsing. Hard-linked policy is refused even when the
+other pathname is outside the config root. Empty layer directories are ignored;
+any nonempty directory still requires `layer.toml`.
 
 ## Layer format (`layer.toml`, schema 1)
 
@@ -293,7 +295,10 @@ A provisional credential-free profile is resolved with nono's manifest format to
 include RW grants from native layer fragments, the official pack, and groups.
 Unresolvable/malformed grant data refuses launch. Executable lookup preserves the
 invoked path/argv identity (notably virtual environments) while validating both that
-path and its canonical target.
+path and its canonical target. The resolved executable is opened without following
+symlinks and must be a regular file. User-owned executables require `st_nlink == 1`;
+the only multi-link exemption is a non-user-owned, root-owned executable that the
+effective user cannot write (checked with `os.access`, including ACLs).
 Hook argv/inline programs are trusted policy, not inferred or rewritten by the engine.
 
 ## Launch sequence

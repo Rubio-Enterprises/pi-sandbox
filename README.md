@@ -112,7 +112,8 @@ content-addressed and installed without overwriting existing files. Launches
 pin their immutable chains. `pi-sandbox-ctl setup` and `pi-sandbox-ctl prune`
 remove only unreferenced profiles older than 24 hours; launches never prune.
 Empty layer directories are ignored. Layer files/directories must be user-owned,
-not symlinks, and not group/world-writable.
+not symlinks, and not group/world-writable. Policy files must have exactly one
+hard link.
 
 ## Credentials
 
@@ -153,7 +154,9 @@ platforms = ["macos"]
 
 Hooks run outside nono, before credentials, with a 30-second timeout and a
 1 MiB limit per output stream. Hook executables must be outside all launch RW
-grants, including resolved symlink targets. Each hook has a private process group;
+grants, including resolved symlink targets. User-owned hook executables must have
+exactly one hard link; only non-user-writable root-owned system binaries are exempt.
+Each hook has a private process group;
 timeout or interruption terminates that group and reaps its direct process. stdin carries schema, OS,
 workdir, launch directory, and HOME as JSON. Success returns empty stdout or
 `{"seatbelt_rules":["(deny …)"],"notice":["- Policy note."]}`.
