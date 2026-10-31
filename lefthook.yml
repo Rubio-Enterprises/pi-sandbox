@@ -1,0 +1,44 @@
+# Config Stub for the Shared Config Directory (ADR-0033). Repository-owned.
+# Source: Rubio-Enterprises/standards, template/lefthook.yml.jinja
+# Repo-specific changes go in lefthook-local.yml.
+# lefthook.yml — Config Stub for the shared hook registry (ADR-0033).
+#
+# The hooks live once in the Shared Config Directory (`.standards-config/`,
+# declared in .mise.toml) and are read through Lefthook's native `extends`.
+# Lefthook silently skips a missing `extends` file, so `standards-ready` fails
+# the commit instead; commit-msg repeats it so an empty pre-commit cannot skip
+# commitlint. Provision the checkout with
+# `mise bootstrap --only repos,tools --yes`; afterwards `mise run setup` also
+# refreshes it.
+#
+# Repository exclusions, repository-owned Fixers, knowledgebase roots and the
+# fork staging override go in lefthook-local.yml, using the syntax in
+# standards' config/lefthook/README.md.
+extends:
+  - .standards-config/config/lefthook/base.yml
+  - .standards-config/config/lefthook/py.yml
+  - .standards-config/config/lefthook/py-pyright.yml
+
+pre-commit:
+  # Commands, not jobs: the lint-config gate lets the stub extend a standard
+  # event only through `commands`.
+  commands:
+    standards-ready:
+      run: >-
+        for parent in
+        .standards-config/config/lefthook/base.yml
+        .standards-config/config/lefthook/py.yml
+        .standards-config/config/lefthook/py-pyright.yml
+        ; do test -f "$parent" || { echo "shared config missing or incomplete: $parent;
+        run mise bootstrap --only repos,tools" >&2; exit 1; }; done
+
+commit-msg:
+  commands:
+    standards-ready:
+      run: >-
+        for parent in
+        .standards-config/config/lefthook/base.yml
+        .standards-config/config/lefthook/py.yml
+        .standards-config/config/lefthook/py-pyright.yml
+        ; do test -f "$parent" || { echo "shared config missing or incomplete: $parent;
+        run mise bootstrap --only repos,tools" >&2; exit 1; }; done

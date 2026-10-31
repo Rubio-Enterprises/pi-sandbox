@@ -1,0 +1,12 @@
+[[command]]
+name = "pi-sandbox"
+purpose = "Run Pi under nono with layered, accident-prevention policy."
+use_when = "Use when a Pi session needs filesystem grants, isolated credentials, and private subagent sockets."
+requires = ["nono", "pi", "git"]
+notes = ["Requires the pinned nono pack; provision with pi-sandbox-ctl setup.", "Layers live under the XDG config directory's pi-sandbox/layers."]
+
+[[command]]
+name = "pi-sandbox-ctl"
+purpose = "Set up, inspect, validate, and diagnose pi-sandbox configuration."
+use_when = "Use when provisioning the nono pack or checking layers and resolved launch profiles."
+notes = ["profile is a tokenless dry run; it does not execute credential commands or hooks."]

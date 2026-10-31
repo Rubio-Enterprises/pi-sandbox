@@ -1,0 +1,70 @@
+{
+  "extends": "nolabs-ai/pi",
+  "meta": {
+    "name": "pi-sandbox-base",
+    "description": "Accident-prevention layer over the official Pi pack"
+  },
+  "groups": {
+    "include": ["mise_manager", "go_runtime", "java_runtime", "bun_runtime"]
+  },
+  "workdir": {
+    "access": "readwrite"
+  },
+  "filesystem": {
+    "read": [
+      "$XDG_DATA_HOME/agent-extensions",
+      "$HOME/.local/pipx",
+      "$HOME/.rbenv",
+      "$HOME/.rvm",
+      "$HOME/.asdf",
+      "$HOME/.tmux.conf",
+      "$XDG_CONFIG_HOME/tmux"
+    ],
+    "deny": [
+      "$HOME/.orbstack",
+      "$HOME/.rd",
+      "$HOME/.local/share/containers",
+      "$HOME/.config/containers",
+      "$HOME/.config/incus",
+      "$HOME/.config/lxc",
+      "$HOME/.config/gh",
+      "$HOME/.config/pi-sandbox",
+      "$XDG_CONFIG_HOME/pi-sandbox",
+      "$HOME/.pg_service.conf",
+      "$HOME/.pgpass",
+      "$HOME/.pypirc"
+    ]
+  },
+  "platform_overrides": {
+    "macos": {
+      "groups": {
+        "exclude": ["user_caches_macos"]
+      },
+      "security": {
+        "ipc_mode": "full"
+      },
+      "filesystem": {
+        "read": [
+          "$HOME/Library/Preferences/.GlobalPreferences*",
+          "$HOME/Library/Preferences/ByHost",
+          "$HOME/Library/Preferences/com.google.Chrome.plist",
+          "$HOME/Library/Preferences/com.google.chrome.for.testing.plist",
+          "$HOME/Library/Preferences/org.chromium.Chromium.plist"
+        ],
+        "read_file": ["$HOME/.CFUserTextEncoding"],
+        "deny": [
+          "$HOME/Library/Containers/com.docker.docker",
+          "$HOME/Library/Application Support/Mozilla"
+        ]
+      }
+    },
+    "linux": {
+      "groups": {
+        "exclude": ["user_caches_linux"]
+      },
+      "filesystem": {
+        "allow": ["/dev/shm"]
+      }
+    }
+  }
+}

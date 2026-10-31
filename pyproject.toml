@@ -1,0 +1,33 @@
+[project]
+name = "pi-sandbox"
+version = "0.1.0"
+description = "Run Pi under nono with layered, accident-prevention policy"
+readme = "README.md"
+requires-python = ">=3.14.6"
+dependencies = []
+
+[project.scripts]
+pi-sandbox = "pi_sandbox.cli:main"
+pi-sandbox-ctl = "pi_sandbox.ctl:main"
+
+[dependency-groups]
+dev = [
+  "pyright==1.1.414",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.12.8"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+testpaths = ["tests"]
+markers = [
+  "live: real nono boundary tests in isolated fixture HOMEs",
+]
+
+[tool.pyright]
+include = ["src"]
+typeCheckingMode = "strict"

@@ -1,0 +1,22 @@
+schema = 1
+
+[layer]
+description = "Example host configuration"
+
+[credentials.env.service.set]
+EXAMPLE_SERVICE_USER = "user@example.invalid"
+
+[network]
+remote_port_deny = [{ port = 8080, service = "example-control" }]
+
+[platform.macos.docker]
+socket = "~/.colima/default/docker.sock"
+
+[platform.macos.grants]
+runtime_dirs = ["~/Library/Caches/ms-playwright/daemon", "~/Library/Caches/ms-playwright/b"]
+
+[platform.linux.docker]
+socket = "/var/run/docker.sock"
+
+[platform.linux.grants]
+runtime_dirs = ["$XDG_CACHE_HOME/ms-playwright/daemon", "$XDG_CACHE_HOME/ms-playwright/b"]

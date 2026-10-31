@@ -1,0 +1,16 @@
+schema = 1
+
+[layer]
+description = "Example user context and workspace"
+
+[grants]
+ro_dirs = ["~/context"]
+ro_files = ["~/Code/AGENTS.md"]
+protected_checkouts = ["~/Code/configuration"]
+
+[workspace]
+scratch_root = "~/Code/.scratch"
+worktree_root = "~/.local/share/git-worktrees/{repo}"
+
+[notice]
+lines = ["- Keep shared context unchanged."]
