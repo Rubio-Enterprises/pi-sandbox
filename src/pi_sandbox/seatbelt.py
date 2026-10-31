@@ -16,6 +16,7 @@ PI_FILES = (
     'settings.json',
     'mcp.json',
     'models.json',
+    'ai-accounts.json',
     'llama-swap-discovery.json',
     'AGENTS.md',
     'keybindings.json',

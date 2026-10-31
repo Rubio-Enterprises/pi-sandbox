@@ -383,9 +383,10 @@ layout: later SBPL rules win, so static floors are applied last.
 
 - `(deny file-write* …)` on `$XDG_CONFIG_HOME/zsh`, nono `profiles` and `packages`, Pi's
   `~/.pi/agent/{extensions,npm,git,bin,skills}` and `~/.pi/config` (subpaths), the literal files
-  `~/.pi/agent/{settings,mcp,models,llama-swap-discovery,keybindings,capability-exposure}.json`
+  `~/.pi/agent/{settings,mcp,models,ai-accounts,llama-swap-discovery,keybindings,capability-exposure}.json`
   and `AGENTS.md`, and the Git regexes `/\.git/hooks(/|$)` and
   `/\.git/(config(\.worktree)?|worktrees/[^/]+/config\.worktree)(\.lock)?$`.
+  `models.json` and `ai-accounts.json` can carry commands and must stay write-blocked.
 - For each `protected_checkouts` entry: deny writes inside it except under its `.git`.
 - `(deny device-microphone)`; deny exec of `/usr/bin/open`, `/usr/bin/osascript`; allow
   `/bin/ps` with `no-sandbox`; deny the Apple Events, SMAppService and background-task Mach
