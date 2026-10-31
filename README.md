@@ -91,12 +91,27 @@ ro_dirs = ["~/context"]
 [workspace]
 scratch_root = "~/Code/.scratch"
 worktree_root = "~/.local/share/git-worktrees/{repo}"
+
+[pi.mcp.example]
+hide_tools = ["delete-*", "write.file"]
+names = ["local-example"]
 ```
 
 Paths support `~/`, `$HOME`, and all four XDG home variables with their
 standard defaults. Layers merge lexically; tables merge, lists append uniquely,
 and later scalars win. A platform table merges immediately after its layer's
 common settings. Same-name hooks replace earlier hooks.
+Use `pi.mcp.<logical>.hide_tools` for shareable server-local tool patterns; put
+local server aliases in `names` in your own layer. The logical key is always
+included. Keys and aliases follow `[A-Za-z0-9_-]+`. Pi replaces punctuation
+with `_` in server/tool names; `*` is preserved as the only wildcard in patterns.
+Empty patterns, whitespace, commas, and control characters are refused.
+The example hides `mcp__example__delete_*` and `mcp__example__write_file`, plus
+the same tools under `mcp__local_example__…`. Keep `pi.exclude_tools` for full
+Pi tool patterns, including non-MCP and package tools. Both sources and CLI
+patterns merge into one flag. `config --json` shows the declared table and
+`pi.rendered_exclude_tools`; `profile` prints the wrapper script preview to
+stderr, preserving native nono profile JSON on stdout.
 See the [three-layer example](examples/layers) and [complete contract](docs/design.md).
 
 ```sh
@@ -104,7 +119,16 @@ pi-sandbox-ctl layers
 pi-sandbox-ctl config --json
 pi-sandbox-ctl validate
 pi-sandbox-ctl pack
+pi-sandbox-ctl doctor --workdir ~/Code/example
 ```
+
+Doctor checks names in `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/mcp.json`
+and, with `--workdir`, the project's `.pi/mcp.json` (project entries override).
+It warns when a logical server matches no configured name (`-` and `_` are
+equivalent), or a config file is missing or unparsable. These checks are
+read-only and advisory: warnings never change policy or exit status.
+Servers registered by extensions are not visible to this check.
+The launcher never reads Pi's MCP config.
 
 Native fragments keep nono's syntax. They cannot set `extends`, `workdir`,
 raw Seatbelt rules, or another profile name. Installed layer profiles are

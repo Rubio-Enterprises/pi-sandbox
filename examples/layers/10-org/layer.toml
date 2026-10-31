@@ -15,5 +15,5 @@ notice = "- The example service is read-only; ask the user to make changes."
 unset = ["EXAMPLE_ADMIN_TOKEN"]
 never_pass = ["EXAMPLE_*"]
 
-[pi]
-exclude_tools = ["mcp__example__delete_*"]
+[pi.mcp.example]
+hide_tools = ["delete-*", "write.file"]

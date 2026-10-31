@@ -9,8 +9,17 @@ from pathlib import Path
 
 from pi_sandbox import Refusal, pack, profile
 from pi_sandbox.cli import message, split
-from pi_sandbox.config import Config, discover, layer_directories, load_layer, resolve
-from pi_sandbox.launch import preview, tool
+from pi_sandbox.config import (
+    MCP_NAME,
+    Config,
+    discover,
+    layer_directories,
+    load_layer,
+    normalize_mcp_name,
+    resolve,
+    table,
+)
+from pi_sandbox.launch import extra_path, preview, render_wrapper, tool
 from pi_sandbox.paths import Paths, atomic_json, private_dir
 from pi_sandbox.platform import Platform
 
@@ -46,7 +55,35 @@ def validate(config: Config) -> None:
                 raise Refusal('cannot resolve layer profiles: ' + result.stderr.strip())
 
 
-def doctor(config: Config, platform: Platform) -> None:
+def mcp_diagnostics(config: Config, workdir: Path | None) -> None:
+    agent_dir = Path(os.environ.get('PI_CODING_AGENT_DIR') or config.paths.home / '.pi/agent')
+    sources = [agent_dir / 'mcp.json']
+    if workdir is not None:
+        sources.append(workdir / '.pi/mcp.json')
+    configured: dict[str, object] = {}
+    for source in sources:
+        try:
+            value = table(json.loads(source.read_text(encoding='utf-8')), str(source))
+            servers = table(value.get('mcpServers', {}), str(source) + '.mcpServers')
+            for name, entry in servers.items():
+                if not MCP_NAME.fullmatch(name):
+                    raise Refusal('invalid MCP server name')
+                table(entry, str(source) + '.mcpServers.' + name)
+            configured.update({normalize_mcp_name(name): entry for name, entry in servers.items()})
+        except (OSError, ValueError, Refusal) as error:
+            sys.stdout.write(f'warning: {source}: cannot read MCP configuration: {error}\n')
+    for logical, server in config.mcp.items():
+        names = [logical, *server.get('names', [])]
+        if not any(normalize_mcp_name(name) in configured for name in names):
+            sys.stdout.write(
+                f'warning: pi.mcp.{logical}: no configured MCP server named {", ".join(names)}; '
+                'its hidden tools match nothing (add names = [...] in your layer)\n'
+            )
+    sys.stdout.write('MCP check: servers registered by extensions are not visible to this check.\n')
+
+
+def doctor(config: Config, platform: Platform, workdir: Path | None = None) -> None:
+    mcp_diagnostics(config, workdir)
     version = pack.version()
     pack.require(config.paths)
     platform.preflight()
@@ -93,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                         failed = True
             return int(failed)
         config = resolve(paths, platform.os, discover(paths))
-        if remaining and args.command != 'profile':
+        if remaining and args.command not in ('profile', 'doctor'):
             raise Refusal('unexpected arguments: ' + ' '.join(remaining))
         if args.command == 'setup':
             pack.setup(paths)
@@ -102,8 +139,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == 'prune':
             sys.stdout.write(f'pruned {profile.prune(config)} profiles\n')
         elif args.command == 'config':
+            values = config.values | {
+                'pi': config.block('pi') | {'rendered_exclude_tools': config.excluded_tools}
+            }
             output = (
-                json.dumps(config.values, indent=2)
+                json.dumps(values, indent=2)
                 if args.json
                 else (
                     'Platform: '
@@ -111,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                     + '\nLayers: '
                     + ', '.join(layer.name for layer in config.layers)
                     + '\n'
-                    + json.dumps(config.values, indent=2)
+                    + json.dumps(values, indent=2)
                 )
             )
             sys.stdout.write(output + '\n')
@@ -119,12 +159,25 @@ def main(argv: list[str] | None = None) -> int:
             options = split(remaining)
             if options.rest:
                 raise Refusal('profile accepts grant flags only')
-            sys.stdout.write(json.dumps(preview(config, platform, options), indent=2) + '\n')
+            value = preview(config, platform, options)
+            script = render_wrapper(
+                config, platform, options, 'pi', paths.launch_state / 'launch.preview'
+            )
+            sys.stdout.write(json.dumps(value, indent=2) + '\n')
+            sys.stderr.write('Pi wrapper (preview):\n' + script)
         elif args.command == 'validate':
             validate(config)
             sys.stdout.write('configuration: valid\n')
         elif args.command == 'doctor':
-            doctor(config, platform)
+            doctor_parser = argparse.ArgumentParser(prog='pi-sandbox-ctl doctor')
+            doctor_parser.add_argument('--workdir', help='also check project MCP configuration')
+            doctor_options = doctor_parser.parse_args(remaining)
+            directory = (
+                extra_path(doctor_options.workdir, paths.home) if doctor_options.workdir else None
+            )
+            if directory is not None and not directory.is_dir():
+                raise Refusal(f'workdir is not a directory: {directory}')
+            doctor(config, platform, directory)
         return 0
     except (Refusal, OSError, ValueError) as error:
         message(str(error))
