@@ -1,6 +1,6 @@
 [project]
 name = "pi-sandbox"
-version = "0.1.0"
+version = "0.1.1"
 description = "Run Pi under nono with layered, accident-prevention policy"
 readme = "README.md"
 requires-python = ">=3.14.6"
