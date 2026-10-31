@@ -4,10 +4,11 @@
   "mounts": [
     "source=${devcontainerId}-venv,target=${containerWorkspaceFolder}/.venv,type=volume"
   ],
-  "securityOpt": ["no-new-privileges=false"],
-  "containerEnv": {
-    "STANDARDS_DEVCONTAINER": "1"
-  },
-  "onCreateCommand": "bash -c 'source scripts/common/standards-pin.sh && standards_devcontainer_setup \"$PWD\" --check-only && exec \"$@\"' standards-lifecycle bash -c 'bash -c '\"'\"'source scripts/common/standards-pin.sh && standards_devcontainer_setup \"$PWD\" --check-only && sudo chown \"$(id -u):$(id -g)\" .venv'\"'\"''",
-  "updateContentCommand": "bash -c 'source scripts/common/standards-pin.sh && standards_devcontainer_setup \"$PWD\"'"
+  "securityOpt": [
+    "no-new-privileges=false"
+  ],
+  "onCreateCommand": "sudo chown \"$(id -u):$(id -g)\" .venv && mise run setup",
+  "remoteEnv": {
+    "NODE_AUTH_TOKEN": "${localEnv:NODE_AUTH_TOKEN}"
+  }
 }

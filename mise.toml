@@ -1,0 +1,45 @@
+# This repository's tools and tasks. The Checks, their tool pins and the Conformance Tasks (check,
+# check:pr, fmt) come from @rubio-enterprises/standards, which `mise run setup` installs into
+# .standards/ and mise loads through .config/mise/conf.d/standards.toml.
+min_version = "2026.10.19"
+
+[env]
+# STANDARDS_VERSION = "1.4.2"  # Release Pin: hold this release while the latest breaks the repository; <issue link>
+# STANDARDS_TEST_GATE = "off"  # Opt-out of the Test Gate; <reason>
+
+[tools]
+# This repository's language runtimes. Node runs the standards install and the npm: check tools.
+node = "24.21.0"
+python = "3.14.6"
+
+[tasks.setup]
+description = "Install the standards package, its tools and the git hooks, then every setup:* task"
+depends = ["standards:install"]
+# `mise install` only when something is missing: on a machine with many tracked configs a no-op
+# install still rebuilds every shim.
+run = ['test -z "$(mise ls --missing)" || mise install', "mise exec -- lefthook install"]
+# This repository's own setup steps (dependencies the Checks or Lifecycle Tasks need) are setup:*
+# tasks; none is fine.
+depends_post = [{ task = "setup:*", optional = true }]
+
+[tasks."standards:install"]
+description = "Install the latest Standards Release (or the STANDARDS_VERSION Release Pin) into .standards/"
+run = '''npm install --prefix .standards --no-save --prefer-online --fetch-retries=0 --no-audit --no-fund --ignore-scripts --loglevel=error "--@rubio-enterprises:registry=${STANDARDS_REGISTRY:-https://npm.pkg.github.com}" '--//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' "@rubio-enterprises/standards@${STANDARDS_VERSION:-latest}"'''
+
+# Lifecycle Tasks (test, typecheck, build, e2e) are this repository's own. `test` and `e2e` write
+# reports/test/junit.xml; the Test Gate runs each one that exists.
+# The `live` tests drive the real nono boundary; they run on demand (`uv run pytest -m live`).
+[tasks.test]
+description = "pytest (unit and stub integration), with the JUnit report the Test Gate checks"
+run = "uv run --frozen pytest -m 'not live' --junitxml=reports/test/junit.xml"
+
+[tasks.typecheck]
+description = "pyright (strict) over src/"
+run = "uv run --frozen pyright"
+
+[tasks."setup:deps"]
+description = "Install the locked Python environment"
+run = "uv sync --frozen"
+
+[hooks]
+enter = "test -f .standards/node_modules/@rubio-enterprises/standards/mise/standards.toml || echo 'standards: not installed; run mise run setup' >&2"
