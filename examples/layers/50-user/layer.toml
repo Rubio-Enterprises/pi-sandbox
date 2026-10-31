@@ -12,5 +12,8 @@ protected_checkouts = ["~/Code/configuration"]
 scratch_root = "~/Code/.scratch"
 worktree_root = "~/.local/share/git-worktrees/{repo}"
 
+[pi.mcp.example]
+names = ["local-example"]
+
 [notice]
 lines = ["- Keep shared context unchanged."]

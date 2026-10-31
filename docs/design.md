@@ -23,7 +23,8 @@ here.
    Seatbelt rules with absolute paths, the Pi wrapper, the notice, hooks and cleanup.
 3. **Facts are pushed in, never pulled.** The engine reads only its own layer directory, the
    environment, Git and the filesystem. It never reads another tool's configuration to discover
-   policy (for example a dotfiles repository or Pi's MCP config).
+   policy (for example a dotfiles repository or Pi's MCP config). Only the controller's advisory
+   `doctor` check reads Pi's MCP config; its findings never affect launch policy.
 4. **Secure by default.** Without layers, the engine still launches a useful, conservative
    sandbox: no credential stores, no Docker, no extra read grants.
 5. **Standard library only.** The runtime has no third-party Python dependencies. External
@@ -93,7 +94,7 @@ in order. A literal `--` passes it and every following argument to Pi.
 | `--scratch=NAME` | Grant `<scratch_root>/NAME` read-write, creating it. `NAME` matches `[A-Za-z0-9][A-Za-z0-9_-]*`. Refused when no layer sets `workspace.scratch_root`. |
 | `--add-dirs=DIRS`, `--add-dirs DIRS` | Colon-separated extra read-write directories (`~` expands). |
 | `--add-dirs-ro=DIRS`, `--add-dirs-ro DIRS` | Colon-separated extra read-only directories. |
-| `--exclude-tools=P,Q`, `--exclude-tools P,Q`, `-xt=…`, `-xt …` | Extra Pi tool patterns merged with the layers' `pi.exclude_tools` into one `--exclude-tools` flag. |
+| `--exclude-tools=P,Q`, `--exclude-tools P,Q`, `-xt=…`, `-xt …` | Extra Pi tool patterns merged with `pi.exclude_tools` and rendered `pi.mcp` patterns into one `--exclude-tools` flag. |
 
 Exit codes: Pi's own status on a completed launch; `2` for a refused launch (message on stderr,
 prefixed `pi-sandbox:`); `128+N` after signal `N`.
@@ -112,10 +113,10 @@ covering the workdir or Git metadata (macOS); Keychain preflight failure (macOS,
 | `setup` | Pull/verify the pinned pack; install immutable profiles; set the pack's Pi skill filter; prune unreferenced profiles older than 24 hours. Idempotent. |
 | `pack` | Print the pinned pack reference (`nolabs-ai/pi@X.Y.Z`). |
 | `layers` | List layers, validation errors, and empty directories marked `empty, ignored`. |
-| `config [--json]` | Print the resolved configuration for this platform. |
-| `profile [--workdir=DIR] [grant flags]` | Assemble and print the per-launch profile without launching or reading credentials (dry run; token-dependent parts shown as if tokenless). |
+| `config [--json]` | Print the resolved configuration for this platform, including declared `pi.mcp` and computed `pi.rendered_exclude_tools`. |
+| `profile [--workdir=DIR] [grant flags]` | Print the per-launch profile (stdout) and wrapper script preview (stderr) without launching or reading credentials (dry run; token-dependent parts shown as if tokenless). |
 | `validate` | Validate every layer (schema, paths, profile.json rules) and resolve the chain with `nono profile show`; non-zero on any error. |
-| `doctor` | `validate` plus nono version, pack version/integrity, Linux kernel/Landlock checks. |
+| `doctor [--workdir DIR]` | `validate` plus nono version, pack version/integrity, Linux kernel/Landlock checks, and advisory MCP server-name checks. |
 | `prune` | Remove unreferenced engine profiles older than 24 hours, retaining current and pinned profiles. |
 
 ## Locations
@@ -195,8 +196,12 @@ unset = ["EXAMPLE_ADMIN_TOKEN"]      # removed from the environment before nono 
 never_pass = ["EXAMPLE_*"]           # SANDBOX_ENV_PASS may never admit these (globs)
 
 [pi]
-exclude_tools = ["mcp__example__delete_*"]   # Pi tool patterns ([A-Za-z0-9_*]+)
+exclude_tools = ["unsafe_*"]         # full Pi tool patterns ([A-Za-z0-9_*]+)
 skill_packs = []                     # extra pack directories whose Pi skills load only inside the sandbox
+
+[pi.mcp.example]                     # shared logical server key ([A-Za-z0-9_-]+)
+hide_tools = ["delete-*", "write.file"] # server-local tool names or * patterns
+names = ["local-example"]            # optional local aliases; example is always included
 
 [notice]
 lines = ["- Example: an extra rule the agent must follow."]
@@ -215,6 +220,47 @@ current platform's table. Tables merge key by key; lists append with order-prese
 de-duplication; scalars from later sources win. `[[hooks]]` entries append; a later hook with the
 same `name` replaces the earlier one. `credentials.env.<slot>` tables merge key by key, so a
 later layer can add `set` entries to an earlier slot (for example a per-user email).
+
+**MCP exclusions.** `pi.mcp.<logical>` is allowed at the top level and under
+`platform.macos` / `platform.linux`. Its only keys are `hide_tools` and `names`, both optional
+lists of strings. Each logical server's lists append with order-preserving de-duplication
+across layers and platform tables. Logical keys and aliases match `[A-Za-z0-9_-]+`.
+Tool patterns are server-local names as reported by the server, not full Pi names; empty
+strings, whitespace, commas (the Pi flag's CSV separator), and control characters are refused.
+Only `*` is a wildcard.
+
+For every logical server, iterate `[logical] + names`, then `hide_tools`, emitting
+`mcp__<normalized-server>__<normalized-pattern>`. Normalization replaces each character other
+than ASCII letters, digits, and `_` with `_`, preserving `*` only in tool patterns, matching
+Pi's naming rule. Thus server names differing only in `-` / `_` are equivalent, and tool names
+such as `write.file` or `api/remove` become `write_file` and `api_remove`. The logical key is
+always included even when aliases are supplied. Flat `pi.exclude_tools` patterns come first,
+then rendered MCP patterns, then CLI `--exclude-tools` / `-xt` patterns; the union is
+order-preserving and de-duplicated into one flag. Flat patterns remain supported for full Pi
+tool names, including non-MCP and package tools.
+
+`config --json` retains the declared `pi.mcp` table and `pi.exclude_tools` list and adds
+`pi.rendered_exclude_tools` for the combined layer-derived patterns (without CLI patterns).
+This computed field is output-only, not a layer key. The controller's `profile` output shows a
+wrapper script on stderr with the merged flag, using `pi` as a placeholder for the real
+executable. Stdout remains a native nono profile JSON document, usable by nono's resolver.
+
+**MCP doctor check.** Only `doctor` reads
+`${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/mcp.json`; with `--workdir DIR` (or `--workdir=DIR`),
+it also reads `DIR/.pi/mcp.json`. Project entries override user entries by normalized server
+name. It inspects only the `mcpServers` names, without connecting to servers, executing config
+commands, resolving credentials, or modifying either file. For each logical server with no
+configured name matching its logical key or aliases after normalization, it warns:
+
+```text
+pi.mcp.<logical>: no configured MCP server named <names>; its hidden tools match nothing (add names = [...] in your layer)
+```
+
+Missing, unreadable, or unparsable MCP files also produce warnings. These diagnostics never
+change the exit status, rendered exclusions, or policy; other doctor failures still fail.
+Servers registered by extensions are not visible to this check, so a warning is not proof that
+the server is absent from a Pi session. Configured-but-disabled servers still count as named
+entries. The launcher never reads Pi's MCP config.
 
 **`profile.json`.** A nono profile fragment. The engine rejects `extends`,
 `unsafe_macos_seatbelt_rules` (raw rules carry absolute paths: use hooks), `workdir`, and

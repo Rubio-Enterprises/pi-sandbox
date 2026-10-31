@@ -3,6 +3,7 @@ import json
 import os
 import re
 import tomllib
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -15,6 +16,7 @@ Table = dict[str, Any]
 INTEGRATIONS = {'credential-stores', 'onepassword', 'cloud-credentials', 'keychain', 'agent-mcp'}
 IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 PATTERN = re.compile(r'^[A-Za-z0-9_*]+$')
+MCP_NAME = re.compile(r'^[A-Za-z0-9_-]+$')
 LAYER_NAME = re.compile(r'^[0-9]{2}-[a-z0-9][a-z0-9-]*$')
 
 SECTIONS: dict[str, dict[str, str]] = {
@@ -35,7 +37,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     'network': {'remote_port_deny': 'ports'},
     'credentials': {'dir': 'path', 'env': 'slots'},
     'env': {'pass': 'names', 'set': 'vars', 'unset': 'names', 'never_pass': 'strings'},
-    'pi': {'exclude_tools': 'patterns', 'skill_packs': 'paths'},
+    'pi': {'exclude_tools': 'patterns', 'skill_packs': 'paths', 'mcp': 'mcp'},
     'notice': {'lines': 'strings'},
 }
 
@@ -72,7 +74,39 @@ def variables(value: Any, location: str) -> Table:
     return result
 
 
+def normalize_mcp_name(value: str, *, pattern: bool = False) -> str:
+    return re.sub(r'[^A-Za-z0-9_*]' if pattern else r'[^A-Za-z0-9_]', '_', value)
+
+
+def validate_mcp(value: Any, location: str) -> Table:
+    servers = table(value, location)
+    result: Table = {}
+    for name, entry in servers.items():
+        server_location = f'{location}.{name}'
+        if not MCP_NAME.fullmatch(name):
+            raise Refusal(f'{server_location}: invalid MCP server name')
+        server = table(entry, server_location)
+        keys(server, {'hide_tools', 'names'}, server_location)
+        for alias in strings(server.get('names', []), server_location + '.names'):
+            if not MCP_NAME.fullmatch(alias):
+                raise Refusal(f'{server_location}.names: invalid MCP server name: {alias!r}')
+        for pattern in strings(server.get('hide_tools', []), server_location + '.hide_tools'):
+            if not pattern or any(
+                char.isspace() or char == ',' or unicodedata.category(char) == 'Cc'
+                for char in pattern
+            ):
+                raise Refusal(
+                    f'{server_location}.hide_tools: invalid MCP tool pattern: {pattern!r}'
+                )
+        result[name] = {
+            key: list(dict.fromkeys(cast(list[str], items))) for key, items in server.items()
+        }
+    return result
+
+
 def validate_value(value: Any, kind: str, location: str, paths: Paths) -> Any:
+    if kind == 'mcp':
+        return validate_mcp(value, location)
     if kind == 'path':
         return paths.expand(string(value, location))
     if kind in ('strings', 'paths', 'names', 'patterns'):
@@ -253,6 +287,22 @@ class Config:
 
     def entries(self, section: str, key: str) -> list[str]:
         return cast(list[str], self.block(section).get(key, []))
+
+    @property
+    def mcp(self) -> dict[str, Table]:
+        return cast(dict[str, Table], self.block('pi').get('mcp', {}))
+
+    @property
+    def excluded_tools(self) -> list[str]:
+        patterns = list(self.entries('pi', 'exclude_tools'))
+        for logical, server in self.mcp.items():
+            for name in [logical, *cast(list[str], server.get('names', []))]:
+                for pattern in cast(list[str], server.get('hide_tools', [])):
+                    patterns.append(
+                        f'mcp__{normalize_mcp_name(name)}__'
+                        + normalize_mcp_name(pattern, pattern=True)
+                    )
+        return list(dict.fromkeys(patterns))
 
     @property
     def integrations(self) -> list[str]:

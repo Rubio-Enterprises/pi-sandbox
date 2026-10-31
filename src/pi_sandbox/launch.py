@@ -398,18 +398,7 @@ def launch(args: Arguments, platform: Platform) -> int:
             )
             wrapper.write(
                 launch_dir,
-                wrapper.render(
-                    pi,
-                    launch_dir,
-                    [*config.entries('pi', 'exclude_tools'), *args.patterns],
-                    pack.skills(
-                        [
-                            pack.directory(paths),
-                            *(Path(p) for p in config.entries('pi', 'skill_packs')),
-                        ]
-                    ),
-                    op=platform.os == 'linux' and 'onepassword' in config.integrations,
-                ),
+                render_wrapper(config, platform, args, pi, launch_dir),
             )
             profile_path = launch_dir / 'profile.json'
             atomic_json(profile_path, profile.assemble(config, platform, current, env, rules))
@@ -439,6 +428,20 @@ def launch(args: Arguments, platform: Platform) -> int:
                         cleanup_step(remove_private_tree, launch_dir)
                     finally:
                         profile.release(pins)
+
+
+def render_wrapper(
+    config: Config, platform: Platform, args: Arguments, pi: str, launch: Path
+) -> str:
+    return wrapper.render(
+        pi,
+        launch,
+        [*config.excluded_tools, *args.patterns],
+        pack.skills(
+            [pack.directory(config.paths), *(Path(p) for p in config.entries('pi', 'skill_packs'))]
+        ),
+        op=platform.os == 'linux' and 'onepassword' in config.integrations,
+    )
 
 
 def preview(config: Config, platform: Platform, args: Arguments) -> dict[str, Any]:
