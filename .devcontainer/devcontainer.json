@@ -1,12 +1,8 @@
 {
   "name": "Rubio Dev Container",
   "image": "ghcr.io/rubio-enterprises/pi-sandbox/devcontainer:main",
-  "mounts": [
-    "source=${devcontainerId}-venv,target=${containerWorkspaceFolder}/.venv,type=volume"
-  ],
-  "securityOpt": [
-    "no-new-privileges=false"
-  ],
+  "mounts": ["source=${devcontainerId}-venv,target=${containerWorkspaceFolder}/.venv,type=volume"],
+  "securityOpt": ["no-new-privileges=false"],
   "onCreateCommand": "sudo chown \"$(id -u):$(id -g)\" .venv && mise run setup",
   "remoteEnv": {
     "NODE_AUTH_TOKEN": "${localEnv:NODE_AUTH_TOKEN}"
