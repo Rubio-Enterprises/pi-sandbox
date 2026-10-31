@@ -214,9 +214,9 @@ issue tracker. Read [AGENTS.md](AGENTS.md) and [the design](docs/design.md)
 before changing launch behavior. Use Conventional Commits.
 
 ```sh
-mise bootstrap --only repos,tools
-uv sync --frozen
-mise run lint
+mise trust
+mise run setup      # standards package, tools, git hooks, uv sync; needs NODE_AUTH_TOKEN (read:packages)
+mise run check
 mise run test
 ```
 

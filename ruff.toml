@@ -1,14 +1,7 @@
-# ruff.toml — Config Stub (ADR-0033).
-# Extends the shared Ruff floor in the Shared Config Directory; a missing parent
-# is a hard Ruff error, never a fallback to defaults. The floor anchors its
-# path patterns at this repository's root.
-#
-# Repository exceptions go below in Ruff's own syntax: `lint.extend-select`
-# adds rules (a `lint.select` here would replace the shared selection and drop
-# its ignores), `lint.ignore` adds ignores, `lint.extend-per-file-ignores` and
-# `extend-exclude` add path entries, and scalars such as `target-version`
-# override.
-extend = ".standards-config/config/ruff.toml"
+# Ruff settings. The shared floor comes from @rubio-enterprises/standards; add this repository's
+# exceptions below in Ruff's own syntax (lint.extend-select, lint.extend-per-file-ignores,
+# extend-exclude); a scalar such as target-version set here wins.
+extend = ".standards/node_modules/@rubio-enterprises/standards/config/ruff.toml"
 target-version = "py314"
 
 [lint.extend-per-file-ignores]
