@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from pi_sandbox.platform import Platform
-from pi_sandbox.seatbelt import PI_DIRS, PI_FILES
+from pi_sandbox.seatbelt import PI_DIRS
 from tests.support import HOST_PATH, REPO, executable, file
 
 pytestmark = pytest.mark.live
@@ -132,7 +132,16 @@ def test_real_boundaries(live, org, token):
             file(path)
         matrix.add('host-write:' + relative, 'append', path, False)
     if platform.os == 'macos':
-        for name in PI_FILES:
+        for name in (
+            'settings.json',
+            'mcp.json',
+            'models.json',
+            'ai-accounts.json',
+            'llama-swap-discovery.json',
+            'AGENTS.md',
+            'keybindings.json',
+            'capability-exposure.json',
+        ):
             path = paths.home / '.pi/agent' / name
             matrix.add('pi-append:' + name, 'append', file(path, '{}'), False)
             matrix.add('pi-replace:' + name, 'replace', path, False)
