@@ -9,15 +9,54 @@ concurrency:
   cancel-in-progress: true
 jobs:
   canonical-tests:
-    name: canonical tests (${{ matrix.platform }})
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [linux, macos]
-    runs-on: >-
-      ${{ matrix.platform == 'linux' &&
-      (fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]')) ||
-      (fromJSON(vars.RUNNERS || '{}').macos || fromJSON('["macos-15"]')) }}
+    name: canonical tests (linux)
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
+    timeout-minutes: 20
+    outputs:
+      tests_ran: ${{ steps.test.outputs.tests_ran }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.14.6"
+      - uses: Rubio-Enterprises/.github/actions/standards-bootstrap@main
+        with:
+          app-id: ${{ secrets.STANDARDS_READER_APP_ID }}
+          private-key: ${{ secrets.STANDARDS_READER_APP_PRIVATE_KEY }}
+          keep-route: false
+      - id: test
+        name: Run unit and integration tests
+        env:
+          RUBIO_TEST_GATE_COUNT_OUTPUT: ${{ runner.temp }}/test-gate-count
+          PYTEST_ADDOPTS: "-m 'not live'"
+        run: |
+          set -euo pipefail
+          rm -f "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          mise run test
+          python3 - reports/unit "$RUBIO_TEST_GATE_COUNT_OUTPUT" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          report_dir, output = map(Path, sys.argv[1:])
+          count = sum(
+              1
+              for report in report_dir.glob("*.xml")
+              for case in ET.parse(report).getroot().iter("testcase")
+              if case.find("skipped") is None
+          )
+          output.write_text(f"{count}\n", encoding="utf-8")
+          PY
+          test -s "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          test "$(cat "$RUBIO_TEST_GATE_COUNT_OUTPUT")" -gt 0
+          echo "tests_ran=true" >> "$GITHUB_OUTPUT"
+
+  macos-tests:
+    name: canonical tests (macos)
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').macos || fromJSON('["macos-15"]') }}
     timeout-minutes: 20
     outputs:
       tests_ran: ${{ steps.test.outputs.tests_ran }}
@@ -64,7 +103,7 @@ jobs:
   aggregate:
     name: test-gate
     if: ${{ always() }}
-    needs: [canonical-tests]
+    needs: [canonical-tests, macos-tests]
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
     timeout-minutes: 15
     env:
