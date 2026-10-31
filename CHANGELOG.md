@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.1...v0.1.2) (2026-10-31)
+
+
+### Features
+
+* hide mcp tools by logical server ([#11](https://github.com/Rubio-Enterprises/pi-sandbox/issues/11)) ([674a86b](https://github.com/Rubio-Enterprises/pi-sandbox/commit/674a86b28de00a2db71de008e78d4a00cb6495dd))
+
 ## [0.1.1](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.0...v0.1.1) (2026-10-31)
 
 
