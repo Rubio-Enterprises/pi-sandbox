@@ -69,6 +69,7 @@ class Fixture:
         return [
             sys.executable,
             str(REPO / 'tests/entry.py'),
+            'launch',
             os_name,
             release,
             'yes' if wsl else 'no',
@@ -89,12 +90,15 @@ class Fixture:
     def capture(self):
         return json.loads((self.out / 'capture.json').read_text())
 
-    def ctl(self, *args):
+    def ctl(self, *args, os_name='macos', release='6.12.0', wsl=False):
         return subprocess.run(
             [
                 sys.executable,
-                '-c',
-                'from pi_sandbox.ctl import main; raise SystemExit(main())',
+                str(REPO / 'tests/entry.py'),
+                'ctl',
+                os_name,
+                release,
+                'yes' if wsl else 'no',
                 *args,
             ],
             env=self.env,

@@ -90,16 +90,17 @@ def test_xdg_and_config_root_overrides(fixture, os_name):
         assert str(engine) in rules
 
 
-def test_production_entry_ignores_test_override_environment(fixture):
+@pytest.mark.parametrize('module', ['cli', 'ctl'])
+def test_production_entry_ignores_test_override_environment(fixture, module):
     from pi_sandbox.platform import Platform
 
-    executable(
-        fixture.bins / 'pi-sandbox',
-        '#!' + sys.executable + '\nfrom pi_sandbox.cli import main\nraise SystemExit(main())\n',
+    entry = executable(
+        fixture.bins / ('pi-sandbox' if module == 'cli' else 'pi-sandbox-ctl'),
+        f'#!{sys.executable}\nfrom pi_sandbox.{module} import main\nraise SystemExit(main())\n',
     )
     platform = Platform.detect()
     result = subprocess.run(
-        [str(fixture.bins / 'pi-sandbox'), '--workdir=' + str(fixture.linked)],
+        [str(entry), *(['profile'] if module == 'ctl' else []), '--workdir=' + str(fixture.linked)],
         env=fixture.env
         | {
             'PI_SANDBOX_PLATFORM': 'other',
@@ -114,7 +115,12 @@ def test_production_entry_ignores_test_override_environment(fixture):
         assert result.returncode == 2 and '6.12' in result.stderr
     else:
         assert result.returncode == 0, result.stderr
-        assert fixture.capture()['argv'][0] == ('wrap' if platform.os == 'macos' else 'run')
+        if module == 'cli':
+            assert fixture.capture()['argv'][0] == ('wrap' if platform.os == 'macos' else 'run')
+        else:
+            assert bool(json.loads(result.stdout)['unsafe_macos_seatbelt_rules']) == (
+                platform.os == 'macos'
+            )
 
 
 def test_hook_timeout_refuses_and_never_creates_child(config, monkeypatch):

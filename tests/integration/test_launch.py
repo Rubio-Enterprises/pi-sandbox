@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -449,22 +450,40 @@ command = "echo should-not-leak >&2; exit 1"
     assert 'PI_SANDBOX_INFERENCE_API_KEY' not in fixture.capture()['env']
 
 
-def test_ctl_commands_and_dry_run(fixture):
-    assert fixture.ctl('pack').stdout == 'nolabs-ai/pi@0.2.2\n'
-    layers = fixture.ctl('layers')
+@pytest.mark.parametrize('os_name', ['macos', 'linux'])
+def test_ctl_commands_and_dry_run(fixture, os_name):
+    ctl = partial(fixture.ctl, os_name=os_name)
+    assert ctl('pack').stdout == 'nolabs-ai/pi@0.2.2\n'
+    layers = ctl('layers')
     assert layers.returncode == 0 and layers.stdout.count('\tvalid') == 3
-    result = fixture.ctl('config', '--json')
+    result = ctl('config', '--json')
     assert (
         result.returncode == 0
         and json.loads(result.stdout)['credentials']['env']['first']['set']['EXAMPLE_EMAIL']
     )
-    result = fixture.ctl('profile', '--workdir=' + str(fixture.repo))
+    runtime = fixture.paths.home / 'runtime' / ('mac' if os_name == 'macos' else 'linux')
+    assert json.loads(result.stdout)['grants']['runtime_dirs'] == [str(runtime)]
+    workdir = fixture.linked if os_name == 'linux' else fixture.repo
+    result = ctl('profile', '--workdir=' + str(workdir))
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
     assert 'GH_TOKEN' not in value['environment']['allow_vars']
     assert 'fixture' not in json.dumps(value['environment']['set_vars'])
     assert not list(fixture.paths.launch_state.glob('launch.*'))
-    assert fixture.ctl('validate').returncode == 0
+    assert ctl('validate').returncode == 0
     fixture.layer('99-invalid', 'schema = 1\nunknown = true\n')
-    result = fixture.ctl('layers')
+    result = ctl('layers')
     assert result.returncode and '99-invalid' in result.stdout and 'unknown key' in result.stdout
+
+
+@pytest.mark.parametrize('release,status', [('6.11.99', 2), ('6.12.0', 0)])
+def test_ctl_profile_uses_injected_kernel_preflight(fixture, release, status):
+    result = fixture.ctl(
+        'profile', '--workdir=' + str(fixture.linked), os_name='linux', release=release
+    )
+    assert result.returncode == status, result.stderr
+    if status:
+        assert 'Linux >= 6.12' in result.stderr
+    else:
+        assert not json.loads(result.stdout)['unsafe_macos_seatbelt_rules']
+    assert not list(fixture.paths.launch_state.glob('launch.*'))

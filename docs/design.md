@@ -523,7 +523,9 @@ nono pull's responsibility; corruption is repaired through nono or refused.
   floors follow all dynamic rules.
 - Linux checks the kernel floor before launch; `doctor` additionally queries Landlock's
   ABI. nono performs the actual platform confinement checks.
-- Tests select OS/kernel/WSL through a Python entry point shipped only under `tests/`.
+- Launcher and controller integration tests select OS/kernel/WSL through a Python
+  entry point shipped only under `tests/`. Native entry-point checks and live doctor
+  tests retain host detection and real kernel/Landlock checks.
   No environment variable relaxes a production preflight. CI excludes the live marker;
   normal local `mise run test` includes it.
 
