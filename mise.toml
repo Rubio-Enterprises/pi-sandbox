@@ -10,7 +10,7 @@ min_version = "2026.10.19"
 [tools]
 # This repository's language runtimes. Node runs the standards install and the npm: check tools.
 node = "24.21.0"
-python = "3.15.1"
+python = "3.15.2"
 
 [tasks.setup]
 description = "Install the standards package, its tools and the git hooks, then every setup:* task"
