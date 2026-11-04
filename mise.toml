@@ -6,8 +6,9 @@ min_version = "2026.10.19"
 [env]
 # STANDARDS_VERSION = "1.4.2"  # Release Pin: hold this release while the latest breaks the repository; <issue link>
 # STANDARDS_TEST_GATE = "off"  # Opt-out of the Test Gate; <reason>
-# uv builds environments on the Python pinned under [tools], not one it finds or downloads itself
-UV_PYTHON = { value = "{{ tools.python.path }}", tools = true }
+# uv builds environments on the Python pinned under [tools], not one it finds or downloads itself.
+# Empty until mise installs that Python (a fresh runner's `mise env` runs before `mise install`); uv ignores an empty UV_PYTHON.
+UV_PYTHON = { value = "{% if tools.python is defined %}{{ tools.python.path }}{% endif %}", tools = true }
 
 [tools]
 # This repository's language runtimes. Node runs the standards install and the npm: check tools.
