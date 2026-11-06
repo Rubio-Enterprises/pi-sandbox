@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.2...v0.1.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **python:** make uv use the mise-pinned python ([#23](https://github.com/Rubio-Enterprises/pi-sandbox/issues/23)) ([ef3d8f0](https://github.com/Rubio-Enterprises/pi-sandbox/commit/ef3d8f0034449a9a54521483147ef1537d5a97ed))
+
 ## [0.1.2](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.1...v0.1.2) (2026-10-31)
 
 
