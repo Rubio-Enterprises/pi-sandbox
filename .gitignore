@@ -26,5 +26,4 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 .tox/
-.standards/
 lefthook-local.yml

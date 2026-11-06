@@ -12,3 +12,23 @@ Run probes only in isolated fixture HOME/XDG roots. Live fixtures belong under
 the XDG cache directory's `pi-sandbox-tests/`, never the system temp directory.
 Use synthetic credentials and sockets; never query a real Keychain or token.
 Preserve the exact Seatbelt rule order and explicit-socket tmux cleanup.
+
+## Commands
+
+First command in a fresh checkout: `just build`.
+Never install toolchains on the host — all project commands run in the dev image through `just`.
+
+```bash
+just build
+just setup
+just check
+just fmt
+just check-pr
+just test
+just typecheck
+just setup-deps
+just shell
+just exec <cmd...>
+```
+
+Single test: `just exec uv run pytest path::test` (Python); otherwise prefix the underlying runner with `just exec`.
