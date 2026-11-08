@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.2...v0.1.3) (2026-11-08)
+
+
+### Features
+
+* give sandboxed builds their own ghcr.io token ([#30](https://github.com/Rubio-Enterprises/pi-sandbox/issues/30)) ([06dc8bf](https://github.com/Rubio-Enterprises/pi-sandbox/commit/06dc8bfa5b9e573c3be020e8b09d1da741a8e4bf))
+
+
+### Bug Fixes
+
+* **python:** make uv use the mise-pinned python ([#23](https://github.com/Rubio-Enterprises/pi-sandbox/issues/23)) ([ef3d8f0](https://github.com/Rubio-Enterprises/pi-sandbox/commit/ef3d8f0034449a9a54521483147ef1537d5a97ed))
+
 ## [0.1.2](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.1...v0.1.2) (2026-10-31)
 
 
