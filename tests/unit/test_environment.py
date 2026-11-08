@@ -132,6 +132,19 @@ def test_builtin_token_readers(fixture, github, packages):
     assert any('GitHub read-only' in line for line in creds.messages) == (github == 'present')
 
 
+@pytest.mark.parametrize('state', STATES)
+def test_ghcr_build_token_is_optional_and_silent(fixture, state):
+    config = Config(fixture.paths)
+    path = config.credentials_dir / 'pi-sandbox-ghcr-build.token'
+    if state == 'absent':
+        path.unlink()
+    elif state == 'empty':
+        path.write_text('\n\n')
+    creds = load(config)
+    assert creds.ghcr_build == ('pi-sandbox-ghcr-build_fixture' if state == 'present' else '')
+    assert not [line for line in creds.messages if 'ghcr-build' in line]
+
+
 def test_dollar_in_generated_set_value_refused(config):
     config.paths.private_cache.parent.mkdir(parents=True)
     config.values = {'docker': {'socket': '/path/$dollar'}}

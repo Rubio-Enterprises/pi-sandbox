@@ -260,6 +260,7 @@ remote_port_deny = [{port=8080, service="example-service"}]
     for name in (
         'pi-sandbox-github',
         'pi-sandbox-ghcr',
+        'pi-sandbox-ghcr-build',
         'first',
         'second',
         'chat',

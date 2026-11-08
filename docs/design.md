@@ -310,6 +310,13 @@ Names map one-to-one onto behaviours of the predecessor:
 - `pi-sandbox-ghcr.token`: a `read:packages` classic token. When non-empty the per-launch
   Docker config gets a `ghcr.io` auth entry (`base64("x-access-token:<token>")`); otherwise
   stderr says `private ghcr.io images off: no token at <path>`.
+- `pi-sandbox-ghcr-build.token`: optional, a second `read:packages` classic token for builds.
+  When non-empty the launch also writes `<launch>/docker/buildx/config/ghcr.io/config.json`
+  with the same `ghcr.io` auth entry form. Buildx (0.31 or later; Compose builds go through it)
+  uses that registry-wide alternative config for every ghcr.io pull during a build, while
+  `docker pull`, `docker run` and `docker compose pull` keep the `pi-sandbox-ghcr.token` entry.
+  A host whose builds and pulls need different GitHub accounts on the same registry uses it;
+  without it nothing is written and nothing is printed.
 
 A trailing newline is stripped. Token bytes never appear in argv, logs, Git config or Git URLs.
 Each launch writes `<launch>/gitconfig` (`credential.helper` empty, the GitHub helper,

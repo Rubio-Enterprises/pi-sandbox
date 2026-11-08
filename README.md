@@ -146,6 +146,9 @@ Provision read-only credentials outside the sandbox in the engine root's
 `pi-sandbox-github.token` supplies `GH_TOKEN` and Git's gh helper.
 Without it, GitHub is disabled; inherited human tokens are not substituted.
 `pi-sandbox-ghcr.token` supplies only Docker's `ghcr.io` auth entry.
+Optional `pi-sandbox-ghcr-build.token` gives builds their own `ghcr.io` credential
+(a Buildx alternative config), for hosts whose builds and pulls need different
+GitHub accounts.
 Trailing newlines are stripped. Tokens never go into argv, profiles, notices,
 wrappers, or Git configuration. The GitHub token covers one organization;
 private repositories elsewhere answer 404 or ask for credentials by design.
