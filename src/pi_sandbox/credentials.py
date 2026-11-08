@@ -19,6 +19,7 @@ def read_token(path: Path) -> str:
 class Credentials:
     github: str = ''
     ghcr: str = ''
+    ghcr_build: str = ''
     env: dict[str, str] = field(default_factory=dict[str, str])
     notices: list[str] = field(default_factory=list[str])
     messages: list[str] = field(default_factory=list[str])
@@ -28,6 +29,7 @@ def load(config: Config) -> Credentials:
     result = Credentials()
     directory = config.credentials_dir
     result.ghcr = read_token(directory / 'pi-sandbox-ghcr.token')
+    result.ghcr_build = read_token(directory / 'pi-sandbox-ghcr-build.token')
     result.github = read_token(directory / 'pi-sandbox-github.token')
     if not result.ghcr:
         path = config.paths.display(directory / 'pi-sandbox-ghcr.token')
@@ -64,14 +66,21 @@ def load(config: Config) -> Credentials:
     return result
 
 
+def ghcr_auth(token: str) -> dict[str, str]:
+    return {'auth': base64.b64encode(('x-access-token:' + token).encode()).decode()}
+
+
 def write_files(launch: Path, credentials: Credentials, os: OS) -> None:
     private_dir(launch / 'gh')
     private_dir(launch / 'docker')
     auths: dict[str, dict[str, str]] = {'https://index.docker.io/v1/': {}}
     if credentials.ghcr:
-        auths['ghcr.io'] = {
-            'auth': base64.b64encode(('x-access-token:' + credentials.ghcr).encode()).decode()
-        }
+        auths['ghcr.io'] = ghcr_auth(credentials.ghcr)
+    if credentials.ghcr_build:
+        atomic_json(
+            launch / 'docker/buildx/config/ghcr.io/config.json',
+            {'auths': {'ghcr.io': ghcr_auth(credentials.ghcr_build)}},
+        )
     plugins = (
         ['/opt/homebrew/lib/docker/cli-plugins', '/usr/local/lib/docker/cli-plugins']
         if os == 'macos'

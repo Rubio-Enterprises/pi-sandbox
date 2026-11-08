@@ -75,6 +75,7 @@ env['NONO_CAP_FILE'] = '/fixture/nono-cap'
 if '--env-credential-map' in args:
     i = args.index('--env-credential-map')
     env[args[i + 2]] = Path(args[i + 1].removeprefix('file://')).read_text().rstrip('\n')
+build = path.parent / 'docker/buildx/config/ghcr.io/config.json'
 capture = dict(
     profile=profile,
     env=env,
@@ -85,6 +86,7 @@ capture = dict(
     gitconfig=(path.parent / 'gitconfig').read_text(),
     gh_files=list((path.parent / 'gh').iterdir()),
     docker=json.loads((path.parent / 'docker/config.json').read_text()),
+    docker_build=json.loads(build.read_text()) if build.is_file() else None,
     mode=path.parent.stat().st_mode & 0o777,
     browser_mode=Path(env['AGENT_BROWSER_SOCKET_DIR']).stat().st_mode & 0o777,
     tmux_mode=Path(env['TMUX_TMPDIR']).stat().st_mode & 0o777,
