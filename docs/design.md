@@ -487,6 +487,12 @@ Built-in unset list: `HERDR_ENV SSH_AUTH_SOCK GITHUB_TOKEN GH_ENTERPRISE_TOKEN
 GITHUB_ENTERPRISE_TOKEN GH_DEBUG GIT_CONFIG_PARAMETERS TMUX TMUX_PANE DOCKER_CONTEXT
 DOCKER_TLS_VERIFY DOCKER_CERT_PATH`, plus `[env].unset`.
 
+Unsetting `HERDR_ENV` and leaving `HERDR_SOCKET_PATH`/`HERDR_PANE_ID` off the allowlist disables
+Herdr's Pi integration inside the sandbox on purpose: Herdr's socket can run commands in
+unsandboxed panes. Herdr then classifies the pane by screen detection, which cannot see a waiting
+question. `TERM_PROGRAM` still passes, so a Pi extension can render the session's state on screen
+for a matching Herdr detection manifest; the engine provides neither.
+
 ## Pi wrapper and notice
 
 `<launch>/bin/pi` is a POSIX `sh` script that `exec`s the absolute real Pi with: one

@@ -209,6 +209,10 @@ The controller's profile preview executes neither hooks nor credentials.
   reachable. Do not use them to launch unsandboxed commands.
 - Subagents use the private `TMUX_TMPDIR`, never Herdr panes or host tmux.
   This does not constrain commands started outside the sandbox.
+- Herdr's Pi integration cannot report from inside the sandbox, so Herdr
+  reads the pane's state from the screen and does not show a waiting
+  question as blocked unless a Pi extension and a matching Herdr detection
+  manifest provide that signal.
 
 ## Contributing
 
