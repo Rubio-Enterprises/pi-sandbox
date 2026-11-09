@@ -156,3 +156,57 @@ def test_native_deny_globs_and_explicit_bridge(native_fixture):
     assert 'SAFE=yes' in result.stdout and 'STATIC_VALUE=native' in result.stdout
     assert 'EXAMPLE_HUMAN=' not in result.stdout
     assert 'EXAMPLE_BRIDGED=synthetic' in result.stdout
+
+
+@pytest.mark.parametrize('source', ['profile', 'cli'])
+@pytest.mark.parametrize('state', ['present', 'empty', 'absent'])
+def test_native_file_credentials_are_required_not_optional(native_fixture, source, state):
+    fixture, nono = native_fixture
+    token = fixture.paths.root / 'credentials/native.token'
+    if state != 'absent':
+        token.write_text('synthetic-native-token\n' if state == 'present' else '')
+    reference = 'file://' + str(token)
+    fields = {'env_credentials': {reference: 'SYNTHETIC_TOKEN'}} if source == 'profile' else {}
+    path = native(fixture.paths, 'file-credential', **fields)
+    mapping = ['--env-credential-map', reference, 'SYNTHETIC_TOKEN'] if source == 'cli' else []
+    result = subprocess.run(
+        [nono, 'wrap', '-s', '--profile', str(path), *mapping, '--', '/usr/bin/env'],
+        env=fixture.env,
+        cwd=fixture.linked,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if state == 'present':
+        assert result.returncode == 0, result.stderr
+        assert 'SYNTHETIC_TOKEN=synthetic-native-token\n' in result.stdout
+    else:
+        assert result.returncode != 0
+        assert 'SYNTHETIC_TOKEN=' not in result.stdout
+        assert 'credential file not found' in result.stderr
+
+
+@pytest.mark.parametrize('source', ['profile', 'cli'])
+def test_native_command_capture_cannot_inject_child_environment(native_fixture, source):
+    fixture, nono = native_fixture
+    fields = (
+        {'env_credentials': {'cmd://synthetic': 'SYNTHETIC_TOKEN'}} if source == 'profile' else {}
+    )
+    path = native(fixture.paths, 'command-credential', **fields)
+    mapping = (
+        ['--env-credential-map', 'cmd://synthetic', 'SYNTHETIC_TOKEN'] if source == 'cli' else []
+    )
+    result = subprocess.run(
+        [nono, 'wrap', '-s', '--profile', str(path), *mapping, '--', '/usr/bin/env'],
+        env=fixture.env,
+        cwd=fixture.linked,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert (
+        'cmd:// credentials can only be resolved by the supervisor credential capture path'
+        in result.stderr
+    )
+    assert 'SYNTHETIC_TOKEN=' not in result.stdout

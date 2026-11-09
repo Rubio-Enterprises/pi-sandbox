@@ -7,7 +7,7 @@ from pi_sandbox import Refusal
 from pi_sandbox.config import resolve
 from pi_sandbox.git import Git
 from pi_sandbox.hooks import run
-from pi_sandbox.integrations import Grants
+from pi_sandbox.integrations import Grants, grants
 from pi_sandbox.linux import native_paths, validate_grants
 from pi_sandbox.platform import Platform
 from pi_sandbox.profile import keychain_safe
@@ -23,6 +23,16 @@ from pi_sandbox.seatbelt import (
     static_rules,
 )
 from pi_sandbox.wrapper import notice, render
+
+
+@pytest.mark.parametrize('os_name', ['macos', 'linux'])
+def test_agent_mcp_does_not_grant_related_service_credentials(config, os_name):
+    config.values['integrations'] = ['agent-mcp']
+    directory = config.paths.config / 'agent-mcp'
+    directory.mkdir(parents=True)
+    result = grants(config, Platform(os_name), github=False)
+    assert str(directory) in result.ro
+    assert result.read_file == []
 
 
 def test_seatbelt_quoting():

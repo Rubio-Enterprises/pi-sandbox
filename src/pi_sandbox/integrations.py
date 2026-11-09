@@ -23,7 +23,6 @@ def grants(config: Config, platform: Platform, *, github: bool) -> Grants:
     if 'agent-mcp' in config.integrations:
         if (paths.config / 'agent-mcp').exists():
             result.ro.append(str(paths.config / 'agent-mcp'))
-        result.read_file.append(str(paths.home / '.opentabs/extension/auth.json'))
     else:
         result.deny.append(str(paths.home / '.config/agent-mcp'))
     if 'onepassword' in config.integrations and platform.os == 'macos':

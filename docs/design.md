@@ -224,7 +224,7 @@ Names map one-to-one onto behaviours of the predecessor:
 | `onepassword` | macOS: `~/.config/op` RW + bypass; 1Password group-container `Data/settings` RO + bypass; `~/.config/1Password` RO (each only when present). Linux: a non-empty `op-service-account.token` in the credentials dir is injected with nono's `--env-credential-map file://… PI_SANDBOX_OP_SERVICE_ACCOUNT_TOKEN`, renamed to `OP_SERVICE_ACCOUNT_TOKEN` by the Pi wrapper; `OP_CONFIG_DIR` is `<cache>/op`; inherited `OP_SERVICE_ACCOUNT_TOKEN` is unset. |
 | `cloud-credentials` | `~/.aws`, `~/.config/gcloud`, `~/.azure`, `~/.azd` RW when present; bypass for all but `.azd`. |
 | `keychain` | macOS, only when the GitHub token is present: `~/Library/Keychains` RW + bypass, `~/Library/Preferences/com.apple.security.plist` allow_file, `/Library/Keychains/System.keychain` read_file + bypass. |
-| `agent-mcp` | `$XDG_CONFIG_HOME/agent-mcp` RO (when present) and `~/.opentabs/extension/auth.json` read_file; without it, `$HOME/.config/agent-mcp` is denied in the launch nono document and by raw rule. |
+| `agent-mcp` | `$XDG_CONFIG_HOME/agent-mcp` RO (when present); without it, `$HOME/.config/agent-mcp` is denied in the launch nono document and by raw rule. Related services' credential files require explicit native `filesystem.read_file` grants in the consumer's Sandbox Profile. |
 
 ## Credentials
 
@@ -255,6 +255,27 @@ Docker never selects a platform credential helper; `cliPluginsExtraDirs` per OS 
 then export `env` and `set` only when the value is non-empty, add a notice line when present
 and print `missing` when absent or empty. Slot variable names and companion names are cleared from inherited values and excluded from
 `SANDBOX_ENV_PASS`. Explicit bridges use nono credential injection, after environment filtering.
+
+**Why retain credential sidecars?** nono 0.80.0 supports required direct file credentials in
+native `env_credentials` (`{"file:///absolute/path/service.token": "SERVICE_TOKEN"}`), as well
+as `--env-credential-map file:///absolute/path/service.token SERVICE_TOKEN`. No sandbox read
+grant is needed: nono reads the file before confinement. Use native JSON for mandatory direct
+credentials; the renderer must supply the absolute file URI (the URI key is not path-expanded).
+
+The native loader propagates missing/empty-file errors and refuses the launch. It has no optional
+slot switch, missing-message/notice protocol, or conditional companion `set` map. Static native
+`environment.set_vars` is unconditional, not a replacement for companion values enabled only when
+the token exists. Native `cmd://` capture is supervisor/proxy-only and explicitly refuses direct
+child-environment injection; it does not replace arbitrary sidecar `command` slots. Native file
+loading also removes one trailing LF/CRLF, whereas sidecars strip all trailing newlines.
+
+Therefore the sidecar adapter remains for optional/command/conditional behavior, but delegates
+injection to native `--env-credential-map env://NAME NAME` after resolving and normalizing values.
+This also pins the loaded value rather than asking nono to reread a potentially changed file.
+Linux's existing optional 1Password file bridge remains a launch-time integration, not evidence
+that every sidecar slot can be replaced by a required static native credential.
+These distinctions are covered by the fixture-only real-nono credential tests and nono 0.80's
+[credential loader](https://github.com/always-further/nono/blob/v0.80.0/crates/nono/src/keystore.rs).
 
 **Git identity.** The launcher resolves `git -C <workdir> config user.name` / `user.email`
 outside the sandbox and passes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` when non-empty; a missing value

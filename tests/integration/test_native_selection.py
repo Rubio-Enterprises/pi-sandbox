@@ -63,3 +63,22 @@ def test_native_isolation_values_win_over_selected_set_vars(fixture):
     env = fixture.capture()['env']
     assert env['GIT_CONFIG_GLOBAL'] != '/host/gitconfig'
     assert env['DOCKER_CONFIG'] != '/host/docker'
+
+
+@pytest.mark.parametrize('os_name', ['macos', 'linux'])
+def test_related_service_auth_requires_an_explicit_native_grant(fixture, os_name):
+    auth = file(
+        fixture.paths.state / 'browser-service/extension/auth.json', '{"token":"synthetic"}'
+    )
+    legacy = file(fixture.paths.home / '.opentabs/extension/auth.json', '{"token":"synthetic"}')
+    result = fixture.run(os_name)
+    assert result.returncode == 0, result.stderr
+    files = fixture.capture()['profile']['filesystem']['read_file']
+    assert str(auth) not in files and str(legacy) not in files
+
+    fixture.sandbox_profile('service-auth', profile={'filesystem': {'read_file': [str(auth)]}})
+    result = fixture.run(os_name)
+    assert result.returncode == 0, result.stderr
+    fs = fixture.capture()['profile']['filesystem']
+    assert str(auth) in fs['read_file']
+    assert str(auth) not in fs['allow_file'] and str(legacy) not in fs['read_file']

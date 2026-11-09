@@ -217,7 +217,16 @@ Use `command` instead of `file` to run `sh -c` outside nono; its stderr is
 discarded. Empty/missing values and failed commands leave the slot off.
 Slot variables cannot be restored through `SANDBOX_ENV_PASS`.
 The opt-in integrations are `credential-stores`, `onepassword`,
-`cloud-credentials`, `keychain`, and `agent-mcp`.
+`cloud-credentials`, `keychain`, and `agent-mcp`. The `agent-mcp` integration grants
+only its own configuration; grant related services' auth files explicitly with
+`filesystem.read_file` in the consumer's Sandbox Profile.
+
+For mandatory direct credentials, prefer native nono `env_credentials`, for example
+`{"file:///absolute/path/service.token": "SERVICE_TOKEN"}`. Native missing/empty
+credentials refuse launch. Keep sidecar slots when absence should disable a service,
+for conditional companion variables/notices, or for outside-sandbox commands;
+nono's `cmd://` capture cannot inject arbitrary command output into the child environment.
+See the [credential comparison](docs/design.md#credentials).
 
 ## Hooks
 
