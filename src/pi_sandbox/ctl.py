@@ -2,6 +2,7 @@ import argparse
 import ctypes
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -117,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         if remaining and args.command not in ('profile', 'doctor'):
             raise Refusal('unexpected arguments: ' + ' '.join(remaining))
         if args.command == 'chain':
+            sys.stdout.write(f'Engine base: {profile.chain(config)[0]}\n')
             for item in config.profiles:
                 sys.stdout.write(f'{item.name}\t{item.path}\tsidecar: {item.sidecar or "none"}\n')
             return 0
@@ -164,10 +166,18 @@ def main(argv: list[str] | None = None) -> int:
                 + json.dumps(prefix(config, plan(config, platform, options)), indent=2)
                 + '\n'
             )
+            launch = paths.launch_state / 'launch.preview'
+            invocation = ['nono', 'wrap'] if platform.os == 'macos' else ['nono', 'run', '--silent']
+            invocation += ['--profile', str(launch / 'profile.json'), '--allow-cwd']
+            if platform.os == 'linux':
+                invocation += [
+                    '--suppress-save-prompt',
+                    str(launch),
+                    '--suppress-save-prompt',
+                    str(paths.private_cache),
+                ]
             sys.stderr.write(
-                'Invocation: nono '
-                + ('wrap' if platform.os == 'macos' else 'run --silent')
-                + ' --profile <launch>/profile.json --allow-cwd -- pi\n'
+                'Invocation (tokenless preview): ' + shlex.join([*invocation, '--', 'pi']) + '\n'
             )
             sys.stderr.write('Pi wrapper (preview):\n' + script)
         elif args.command == 'validate':
