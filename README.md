@@ -2,11 +2,12 @@
 
 [![standard-readme](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg)](https://github.com/RichardLitt/standard-readme)
 
-Run Pi under nono with layered, accident-prevention policy.
+Run Pi under nono with native Sandbox Profiles and accident-prevention policy.
 
 The engine assembles filesystem grants, isolated Git/Docker configuration,
 credential bridges, a sandbox notice, and a Pi wrapper inherited by subagents.
-Policy belongs in ordered TOML layers and optional native nono profiles.
+A Sandbox Profile is a native nono JSON file; an optional Pi sidecar holds only
+Pi settings and launch-time integrations.
 Runtime code uses only the Python standard library.
 
 ## Table of Contents
@@ -24,7 +25,7 @@ Runtime code uses only the Python standard library.
 ## Security
 
 This prevents accidental host damage, not an adversarial agent or prompt injection.
-Layers and hooks are trusted executable policy. Review them before installing.
+Sandbox Profiles, Pi sidecars and hooks are trusted executable policy. Review them before installing.
 A denied operation means stop and ask for a wider launch, not find a detour.
 Docker VM mounts can bypass host filesystem restrictions.
 
@@ -42,7 +43,7 @@ pi-sandbox-ctl doctor
 ```
 
 Setup pulls the signed `nolabs-ai/pi@0.2.2` pack if needed and installs the
-engine/layer profiles. Pack profile bytes must match nono's recorded SHA-256.
+engine base and selected Sandbox Profile snapshots. Pack nono profile bytes must match nono's recorded SHA-256.
 It sets the pack's Pi settings entry to `skills = []`,
 so its sandbox-only skills do not load in ordinary Pi sessions. The launch
 wrapper loads those skills inside nono. Other packs are preserved.
@@ -52,7 +53,7 @@ For development, `uv run pi-sandbox …` works without a tool installation.
 ## Usage
 
 ```sh
-pi-sandbox --workdir=~/Code/example
+pi-sandbox --profile pi-machine --workdir=~/Code/example
 pi-sandbox --scratch=investigation --add-dirs-ro=~/context -p "Inspect this project"
 pi-sandbox --add-dirs ~/Code/other --exclude-tools=unsafe_* -- -p "Explain the code"
 pi-sandbox-ctl profile --workdir=~/Code/example
@@ -60,13 +61,13 @@ pi-sandbox-ctl profile --workdir=~/Code/example
 
 The workdir must exist and cannot be HOME, its ancestor, or `/`.
 On Linux, a Git project must be a linked worktree, not the main checkout.
-Without layers, Docker and credential-store integrations are disabled.
+Without a selected Sandbox Profile, Docker and credential-store integrations are disabled.
 
 Grant flags are consumed before Pi starts. `--add-dirs` and `--add-dirs-ro`
 accept colon-separated directories. A literal `--`, including the separator,
-passes all following arguments unchanged to Pi. Exclusions from layers,
+passes all following arguments unchanged to Pi. Exclusions from Pi sidecars,
 `--exclude-tools`, and `-xt` become one de-duplicated Pi flag.
-`--scratch` requires a layer's scratch root and a single effort name.
+`--scratch` requires a Pi sidecar's scratch root and a single effort name.
 
 Exit status is Pi's status, 2 for a refused launch, or 128 + signal number.
 Private launch, browser, and tmux directories are cleaned on exit, including
@@ -75,69 +76,117 @@ HUP/INT/TERM and terminal closure. Screenshots under the XDG state directory's
 
 ## Configuration
 
-Layers live at `${XDG_CONFIG_HOME:-$HOME/.config}/pi-sandbox/layers/NN-name/`.
-Override the engine root with `PI_SANDBOX_CONFIG_DIR`. Each directory contains
-`layer.toml` and optionally `profile.json`. The whole engine config root and
-credentials directory are denied inside nono.
+A **Sandbox Profile** is a native nono JSON file at
+`${XDG_CONFIG_HOME:-$HOME/.config}/nono/profiles/<name>.json`.
+Compose Sandbox Profiles using nono's own `extends`; built-in nono profiles and
+nono packs can be bases too. The engine's base is added automatically: user JSON
+never names it.
 
-Create `layers/50-user/layer.toml`:
+Selection: `pi-sandbox --profile <name>` (also `--profile=<name>`) >
+`PI_SANDBOX_PROFILE` > engine base alone. A missing selected JSON file refuses.
+The engine never reads or sets `NONO_PROFILE`. A literal `--` stops engine flag
+parsing, so a later `--profile` goes to Pi.
+
+Create `nono/profiles/pi-user.json` under the XDG config directory:
+
+```json
+{
+  "meta": { "name": "pi-user" },
+  "filesystem": { "read": ["~/context"] },
+  "environment": {
+    "allow_vars": ["EXAMPLE_REGION"],
+    "deny_vars": ["EXAMPLE_ADMIN_*"],
+    "set_vars": { "DO_NOT_TRACK": "1" }
+  }
+}
+```
+
+Create `nono/profiles/pi-machine.json`:
+
+```json
+{
+  "meta": { "name": "pi-machine" },
+  "extends": ["pi-user"]
+}
+```
+
+An optional same-name **Pi sidecar** holds only settings nono cannot express or
+the engine must act on at launch:
+`${PI_SANDBOX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/pi-sandbox}/profiles/<name>.toml`.
+For example, `pi-sandbox/profiles/pi-user.toml`:
 
 ```toml
-schema = 1
-
-[grants]
-ro_dirs = ["~/context"]
-
 [workspace]
 scratch_root = "~/Code/.scratch"
-worktree_root = "~/.local/share/git-worktrees/{repo}"
+worktree_root = "$XDG_DATA_HOME/git-worktrees/{repo}"
 
 [pi.mcp.example]
 hide_tools = ["delete-*", "write.file"]
 names = ["local-example"]
+
+[notice]
+lines = ["- Example service access is read-only."]
 ```
 
-Paths support `~/`, `$HOME`, and all four XDG home variables with their
-standard defaults. Layers merge lexically; tables merge, lists append uniquely,
-and later scalars win. A platform table merges immediately after its layer's
-common settings. Same-name hooks replace earlier hooks.
-Use `pi.mcp.<logical>.hide_tools` for shareable server-local tool patterns; put
-local server aliases in `names` in your own layer. The logical key is always
-included. Keys and aliases follow `[A-Za-z0-9_-]+`. Pi replaces punctuation
-with `_` in server/tool names; `*` is preserved as the only wildcard in patterns.
-Empty patterns, whitespace, commas, and control characters are refused.
-The example hides `mcp__example__delete_*` and `mcp__example__write_file`, plus
-the same tools under `mcp__local_example__…`. Keep `pi.exclude_tools` for full
-Pi tool patterns, including non-MCP and package tools. Both sources and CLI
-patterns merge into one flag. `config --json` shows the declared table and
-`pi.rendered_exclude_tools`; `profile` prints the wrapper script preview to
-stderr, preserving native nono profile JSON on stdout.
-See the [three-layer example](examples/layers) and [complete contract](docs/design.md).
+Sidecars support `pi`, `notice`, `credentials`, `workspace`, launch-dependent
+`grants`, `docker.socket`, `integrations` and `hooks`. Every setting can be
+overridden under `platform.macos` / `platform.linux`. There is no schema/version
+key. Unknown fields refuse, with a native-field replacement hint where available.
+See the [exact schema and migration mapping](docs/design.md#pi-sidecar-schema)
+and [composed example pairs](examples/profiles).
+
+The engine reads only the selected user inheritance graph. Sidecars merge
+depth-first, left-to-right; each file's platform block follows its common block.
+Tables merge, lists append uniquely and later scalars win; same-name hooks replace.
+Shared ancestors are revisited for each sibling, matching nono. Non-user bases
+have no sidecar. Sidecar paths support `~/`, `$HOME` and the four XDG home
+variables. Native JSON expansion and native policy merging belong to nono.
+
+Put filesystem grants/denies and bypasses in native `filesystem`, environment
+policy in native `environment`, and static macOS port rules in
+`platform_overrides.macos.unsafe_macos_seatbelt_rules`. Native `deny_vars`
+supports `*` patterns and filters all inherited values, not only optional
+passthrough. Explicit sidecar credential bridges are injected after filtering.
+Linux cannot exactly express a remote-port deny with a localhost exception;
+there is no automatic translation. See [native mappings](docs/design.md#moving-native-policy-into-json).
+The retired numbered-directory format is not read.
+
+MCP logical keys and aliases match `[A-Za-z0-9_-]+`. Server-local tool patterns
+may use `*`; empty patterns, whitespace, commas and controls refuse. Pi naming
+replaces punctuation with `_`, so the example hides `mcp__example__delete_*`
+and `mcp__example__write_file`, and their local-example equivalents.
+Use `pi.exclude_tools` for full Pi patterns, including non-MCP tools.
+All exclusions merge with CLI patterns into one de-duplicated flag.
 
 ```sh
-pi-sandbox-ctl layers
+export PI_SANDBOX_PROFILE=pi-machine
+pi-sandbox-ctl chain
 pi-sandbox-ctl config --json
 pi-sandbox-ctl validate
-pi-sandbox-ctl pack
+pi-sandbox-ctl profile --workdir=~/Code/example
 pi-sandbox-ctl doctor --workdir ~/Code/example
 ```
 
+All controller commands accept `--profile <name>`. `config --json` prints the
+ordered chain, merged sidecar, sidecar paths and `rendered_exclude_tools`.
+`profile` prints launch nono JSON on stdout and the launch-local prefix,
+invocation and Pi wrapper on stderr. Preview installs immutable native
+snapshots, but creates no launch/runtime roots and executes no hooks or credentials.
+
 Doctor checks names in `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/mcp.json`
 and, with `--workdir`, the project's `.pi/mcp.json` (project entries override).
-It warns when a logical server matches no configured name (`-` and `_` are
-equivalent), or a config file is missing or unparsable. These checks are
-read-only and advisory: warnings never change policy or exit status.
-Servers registered by extensions are not visible to this check.
-The launcher never reads Pi's MCP config.
+Missing/unparsable files and unmatched logical server aliases warn without
+changing policy or exit status. Extension-registered servers are not visible.
+The launcher never reads Pi's MCP configuration.
 
-Native fragments keep nono's syntax. They cannot set `extends`, `workdir`,
-raw Seatbelt rules, or another profile name. Installed layer profiles are
-content-addressed and installed without overwriting existing files. Launches
-pin their immutable chains. `pi-sandbox-ctl setup` and `pi-sandbox-ctl prune`
-remove only unreferenced profiles older than 24 hours; launches never prune.
-Empty layer directories are ignored. Layer files/directories must be user-owned,
-not symlinks, and not group/world-writable. Policy files must have exactly one
-hard link.
+The entire engine config root, including `credentials/` and `host/`, is denied
+inside nono. Selected JSON files and sidecars must be user-owned, non-symlink,
+not group/world-writable and have exactly one hard link. Reachable user JSON
+ancestors are installed as immutable content-addressed snapshots, with parent
+references pinned to their snapshots. The full graph is locked during launch.
+`setup` and `prune` remove only unreferenced snapshots older than 24 hours,
+never active pins; launches never prune. The launch top consumes one of nono's
+ten inheritance levels.
 
 ## Credentials
 
@@ -149,7 +198,7 @@ Without it, GitHub is disabled; inherited human tokens are not substituted.
 Optional `pi-sandbox-ghcr-build.token` gives builds their own `ghcr.io` credential
 (a Buildx alternative config), for hosts whose builds and pulls need different
 GitHub accounts.
-Trailing newlines are stripped. Tokens never go into argv, profiles, notices,
+Trailing newlines are stripped. Tokens never go into argv, native JSON documents, notices,
 wrappers, or Git configuration. The GitHub token covers one organization;
 private repositories elsewhere answer 404 or ask for credentials by design.
 
@@ -189,7 +238,7 @@ workdir, launch directory, and HOME as JSON. Success returns empty stdout or
 `{"seatbelt_rules":["(deny …)"],"notice":["- Policy note."]}`.
 Rules are macOS-only; notices work on both platforms.
 Failure refuses the launch and includes the hook's stderr.
-The controller's profile preview executes neither hooks nor credentials.
+The controller's `profile` preview executes neither hooks nor credentials.
 
 ## Platforms and limits
 
@@ -221,10 +270,10 @@ issue tracker. Read [AGENTS.md](AGENTS.md) and [the design](docs/design.md)
 before changing launch behavior. Use Conventional Commits.
 
 ```sh
-mise trust
-mise run setup      # standards package, tools, git hooks, uv sync; needs NODE_AUTH_TOKEN (read:packages)
-mise run check
-mise run test
+just build
+just setup
+just check
+just test
 ```
 
 Unit tests and stub integrations run on either OS; only `tests/entry.py` can

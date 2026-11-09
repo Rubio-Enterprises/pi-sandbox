@@ -1,290 +1,217 @@
 # pi-sandbox design
 
 `pi-sandbox` runs the [Pi coding agent](https://github.com/earendil-works/pi) under
-[nono](https://nono.sh) on macOS and Linux (including WSL2). It prevents **accidental host
-damage** by a coding agent. It does not contain an adversarial agent or defend against prompt
-injection.
-
-This document is the design contract. Code, tests and README follow it. When it is silent about
-a behaviour, preserve the behaviour of the predecessor implementation (a zsh launcher rendered
-by a private dotfiles repository; maintainers have the reference copy) and record the decision
-here.
+[nono](https://nono.sh) on macOS and Linux (including WSL2). It prevents accidental host
+damage, not an adversarial agent or prompt injection. This document is the design contract.
 
 ## Principles
 
-1. **Mechanism, not policy about a person.** The engine may know about third-party tools
-   (Git, Docker, 1Password, Chrome, Playwright, tmux, Herdr, Worktrunk, mise, uv). It must not
-   know any user's paths, organisations, hosts, identities, MCP servers or credentials. Those
-   arrive through layers.
-2. **nono owns what the sandbox permits; the engine owns how a launch is assembled.** Anything
-   expressible as a static nono profile key lives in a nono profile: the engine's base profile or
-   a layer's `profile.json`. The engine handles what depends on launch-time facts or is not a
-   sandbox permission: workdir and Git grants, existence checks, credential bridging, raw
-   Seatbelt rules with absolute paths, the Pi wrapper, the notice, hooks and cleanup.
-3. **Facts are pushed in, never pulled.** The engine reads only its own layer directory, the
-   environment, Git and the filesystem. It never reads another tool's configuration to discover
-   policy (for example a dotfiles repository or Pi's MCP config). Only the controller's advisory
-   `doctor` check reads Pi's MCP config; its findings never affect launch policy.
-4. **Secure by default.** Without layers, the engine still launches a useful, conservative
-   sandbox: no credential stores, no Docker, no extra read grants.
-5. **Standard library only.** The runtime has no third-party Python dependencies. External
-   programs: `nono`, `pi`, `git`; optional `tmux`, `agent-browser`, `gh` (used inside the
-   sandbox as Git's credential helper).
+1. **Mechanism, not personal policy.** User paths, identities, organisations and service choices
+   arrive through Sandbox Profiles and their optional Pi sidecars.
+2. **nono owns permissions.** A **Sandbox Profile** is a native nono JSON file, composed only
+   through nono's `extends`. The engine handles Pi settings and launch-dependent facts.
+3. **Facts are pushed in.** The launcher reads selected policy, environment, Git and filesystem
+   facts, not other tools' configuration. Only the controller's advisory MCP check reads Pi config.
+4. **Conservative without selection.** The engine base alone supplies no credential-store
+   integrations, Docker routing or extra user grants. Provisioned built-in token files still work.
+5. **Standard library only.** Runtime programs are `nono`, `pi`, `git`; optional integrations
+   use `gh`, `tmux` and `agent-browser`.
 
-## Architecture
+## Native composition and immutable snapshots
 
-```text
-nolabs-ai/pi                    official signed nono pack (pinned by the engine)
-  └─ pi-sandbox-base-<sha12>          engine-shipped static profile
-       ├─ pi-sandbox-layer-<a>-<sha12> layer profile.json, installed immutably
-       ├─ pi-sandbox-layer-<b>-<sha12>
-       └─ <launch>/profile.json       per-launch profile extends the addressed names
-```
+Sandbox Profiles live at `${XDG_CONFIG_HOME:-$HOME/.config}/nono/profiles/<name>.json`.
+They may extend other user files, nono built-ins or nono packs. Names are alphanumeric with
+internal hyphens. Selection is `--profile <name>` (or `--profile=<name>`) >
+`PI_SANDBOX_PROFILE` > no selection. The engine never reads or sets `NONO_PROFILE`; every
+invocation passes an explicit generated nono document, so nono's variable cannot select policy.
+A missing selected user JSON file refuses the launch. Paths are not accepted as selection names.
 
-nono resolves the chain: `extends` takes a list of profile names merged left to right, each
-profile's `platform_overrides` applies, arrays are dedup-appended and denies are unioned. A later
-layer cannot remove an earlier deny; put each deny in the layer that wants it.
+nono merges native policy, including filesystem grants/denies, environment filtering and values,
+session hooks, security settings and raw Seatbelt rules. Scalars are child-wins, arrays
+dedup-append, maps child-key-wins, denies accumulate. Native platform overrides apply after
+inheritance. Unknown native fields are rejected by nono, not maintained in a duplicate engine schema.
 
-The engine also merges the layers' `layer.toml` files (engine settings, below) into one
-**resolved configuration** and uses it to assemble the per-launch profile, environment, Pi
-wrapper and notice.
+The engine traverses only user JSON `extends` edges, depth-first left-to-right, revisiting shared
+ancestors for each sibling exactly as nono does. True cycles and excessive depth refuse.
+Non-user references are left to nono and have no sidecar; their internals are not traversed.
+The generated launch top consumes one inheritance level: at most nine user inheritance edges
+fit before nono's depth-10 boundary, potentially fewer when non-user bases also extend others.
+
+Every reachable user JSON object is copied to an immutable content-addressed installed nono file.
+Its user-parent references are rewritten to the parents' installed names, preserving the graph;
+non-user references remain native names. The engine does not flatten or merge native policy.
+Changing an ancestor changes descendant snapshot names. User files never name the engine base.
+
+Launch composition uses two private native nono documents:
+
+- `<launch>/engine.json`: extends the installed engine base, supplies dynamic Git Seatbelt rules.
+- `<launch>/profile.json`: extends `["engine", "<selected snapshot>"]` (or just `["engine"]`),
+  adds launch grants and environment, and puts hook/host/static safety rules in its platform override.
+
+The engine base extends the verified `nolabs-ai/pi` pack. The prefix is necessary because
+nono applies platform overrides after inheritance: Git rules stay first, user rules follow,
+and safety floors stay last. Unrelated user scalars remain authoritative; launch isolation
+environment values, working-directory access and safety floors are engine-owned.
+Native session hooks remain nono-owned; sidecar hooks implement the engine's separate
+pre-credential JSON protocol.
+
+Installed names are `pi-sandbox-base-<sha12>` and `pi-sandbox-user-<name>-<sha12>`.
+The digest covers exact stored UTF-8 JSON bytes (sorted keys, two-space indent, trailing newline).
+Metadata retains its original name. Publication uses exclusive hard-link creation followed by
+removal of the temporary alias; existing bytes are compared without newline normalization and
+never overwritten. CRLF/CR mutations refuse even if JSON meaning is unchanged.
+
+Launch and validation pin **all** installed ancestors with shared advisory locks on read-only
+descriptors. Installation/pinning and pruning also share a short-lived store lock. Pruning needs
+a nonblocking exclusive candidate lock. No writable hard-link aliases or state-file pins are
+created. Only `setup` and explicit `prune` remove unreferenced `pi-sandbox-*.json` files,
+retaining the current graph, active pins and files younger than 24 hours. Launches never prune.
+Native built-ins and non-user packs remain nono-resolved; the engine verifies its pinned pack
+using the integrity contract below.
+
+Policy files and their containing policy directories must be user-owned, not symlinks and not
+group/world-writable. Files require exactly one hard link. Reads are descriptor-relative with
+no-follow opens; an absent optional sidecar is allowed, an unsafe one is refused.
 
 ## Package layout
 
-```text
-src/pi_sandbox/
-  __init__.py
-  cli.py            pi-sandbox entry point: argument split, error reporting, exit codes
-  ctl.py            pi-sandbox-ctl entry point (admin subcommands)
-  config.py         layer discovery, TOML schema validation, merge, path expansion
-  platform.py       OS detection, WSL detection, kernel preflight
-  paths.py          XDG helpers and the engine's own directories
-  git.py            Git topology, identity, worktree root
-  seatbelt.py       raw Seatbelt rule rendering and quoting (macOS)
-  linux.py          Linux grant validation and piecewise Git grants
-  credentials.py    token files, env slots, gitconfig, Docker config, gh config
-  integrations.py   built-in integrations (1Password, cloud credentials, Keychain, agent-mcp)
-  hooks.py          hook execution protocol
-  profile.py        per-launch profile assembly, layer-profile sync, Keychain preflight
-  environment.py    allowlist, set_vars, unset list, SANDBOX_ENV_PASS
-  wrapper.py        <launch>/bin/pi and notice.md
-  launch.py         orchestration, signal handling, cleanup
-  pack.py           nono pack pin, setup, Pi settings skill filter
-  data/base-profile.json
-tests/
-  unit/             pure-function tests
-  integration/      black-box launches against stub nono/pi (any OS)
-  live/             real nono launches with a probe in place of Pi (skip when nono is absent)
-docs/design.md      this file
-```
-
-`pyproject.toml` declares two console scripts: `pi-sandbox = "pi_sandbox.cli:main"` and
-`pi-sandbox-ctl = "pi_sandbox.ctl:main"`. Python floor: the repository's pinned Python.
+`cli.py` splits engine/Pi arguments; `config.py` traverses native user inheritance, validates and
+merges sidecars; `profile.py` installs/pins/prunes snapshots and assembles native launch documents;
+`launch.py` orchestrates. `paths.py`, `platform.py`, `git.py`, `linux.py`, `seatbelt.py`,
+`credentials.py`, `environment.py`, `integrations.py`, `hooks.py`, `wrapper.py` and `pack.py`
+keep their respective filesystem, platform, Git, policy, launch integration and cleanup concerns.
+`data/base-profile.json` is engine-installed. Tests are split into unit, integration and live tiers.
 
 ## CLI
 
-### `pi-sandbox [grant flags] [Pi arguments]`
-
-Grant flags are consumed by the engine and never reach Pi. Everything else reaches Pi unchanged,
-in order. A literal `--` passes it and every following argument to Pi.
+`pi-sandbox [engine flags] [Pi arguments]` consumes:
 
 | Flag | Meaning |
 | --- | --- |
-| `--workdir=DIR` | Project directory (default: `$PWD`). `~` expands. Must exist. |
-| `--scratch=NAME` | Grant `<scratch_root>/NAME` read-write, creating it. `NAME` matches `[A-Za-z0-9][A-Za-z0-9_-]*`. Refused when no layer sets `workspace.scratch_root`. |
-| `--add-dirs=DIRS`, `--add-dirs DIRS` | Colon-separated extra read-write directories (`~` expands). |
-| `--add-dirs-ro=DIRS`, `--add-dirs-ro DIRS` | Colon-separated extra read-only directories. |
-| `--exclude-tools=P,Q`, `--exclude-tools P,Q`, `-xt=…`, `-xt …` | Extra Pi tool patterns merged with `pi.exclude_tools` and rendered `pi.mcp` patterns into one `--exclude-tools` flag. |
+| `--profile NAME`, `--profile=NAME` | Select a Sandbox Profile; overrides `PI_SANDBOX_PROFILE`. |
+| `--workdir=DIR` | Project directory, default PWD. Must exist; cannot contain HOME. |
+| `--scratch=NAME` | Create/grant `<workspace.scratch_root>/NAME`; single effort name matching `[A-Za-z0-9][A-Za-z0-9_-]*`. |
+| `--add-dirs[=]DIRS`, `--add-dirs-ro[=]DIRS` | Extra RW/RO colon-separated directories. |
+| `--exclude-tools[=]P,Q`, `-xt[=]P,Q` | Merge Pi exclusions with sidecar exclusions. |
 
-Exit codes: Pi's own status on a completed launch; `2` for a refused launch (message on stderr,
-prefixed `pi-sandbox:`); `128+N` after signal `N`.
+A literal `--`, including the separator, passes everything following unchanged to Pi.
+Exit status is Pi's status, 2 for refusal, or 128 + signal. Refusal messages start `pi-sandbox:`.
+Already inside nono (`NONO_CAP_FILE`), missing tools, unsafe workdirs, invalid policy, missing or
+corrupt pack, old nono/kernel, unsafe hooks and failed tokenless Keychain checks refuse.
 
-Refusals (all before any launch state is created unless noted): already inside nono
-(`NONO_CAP_FILE` set); `pi`, `nono` or `git` missing; workdir not a directory; workdir is `/`,
-`$HOME` or an ancestor of `$HOME`; invalid scratch name or scratch without `scratch_root`; nono
-older than the supported minimum; pinned pack missing (tell the user to run
-`pi-sandbox-ctl setup`); any hook refusal; Linux preflight failures (below); Git hooks directory
-covering the workdir or Git metadata (macOS); Keychain preflight failure (macOS, tokenless).
+### Controller
 
-### `pi-sandbox-ctl`
+All controller subcommands accept `--profile NAME` with the same environment fallback.
 
 | Subcommand | Behaviour |
 | --- | --- |
-| `setup` | Pull/verify the pinned pack; install immutable profiles; set the pack's Pi skill filter; prune unreferenced profiles older than 24 hours. Idempotent. |
-| `pack` | Print the pinned pack reference (`nolabs-ai/pi@X.Y.Z`). |
-| `layers` | List layers, validation errors, and empty directories marked `empty, ignored`. |
-| `config [--json]` | Print the resolved configuration for this platform, including declared `pi.mcp` and computed `pi.rendered_exclude_tools`. |
-| `profile [--workdir=DIR] [grant flags]` | Print the per-launch profile (stdout) and wrapper script preview (stderr) without launching or reading credentials (dry run; token-dependent parts shown as if tokenless). |
-| `validate` | Validate every layer (schema, paths, profile.json rules) and resolve the chain with `nono profile show`; non-zero on any error. |
-| `doctor [--workdir DIR]` | `validate` plus nono version, pack version/integrity, Linux kernel/Landlock checks, and advisory MCP server-name checks. |
-| `prune` | Remove unreferenced engine profiles older than 24 hours, retaining current and pinned profiles. |
+| `setup` | Pull/verify pinned pack, install current native snapshots, set pack Pi skill filter, prune stale snapshots. |
+| `pack` | Print pinned pack reference. |
+| `chain` | Print resolved user/non-user traversal and each merged sidecar path (or none). |
+| `config --json` | Print `selected`, ordered `chain`, merged `sidecar`, ordered `sidecars` paths, and `rendered_exclude_tools`. |
+| `profile [engine flags]` | Install snapshots; preview launch nono JSON on stdout, prefix/invocation/Pi wrapper on stderr; no credentials or hooks. |
+| `validate` | Validate both sidecar platforms and use nono to validate installed JSON and resolve the complete chain. |
+| `doctor [--workdir DIR]` | Validate plus nono/pack/kernel/Landlock checks and advisory MCP diagnostics. |
+| `prune` | Remove only unreferenced engine-owned snapshots older than 24 hours and not actively pinned. |
 
 ## Locations
 
 | Purpose | Path |
 | --- | --- |
-| Engine config root | `${PI_SANDBOX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/pi-sandbox}` |
-| Layers | `<config root>/layers/<NN-name>/layer.toml` and optional `profile.json` |
-| Default credentials directory | `<config root>/credentials` |
-| Launch state | `${XDG_STATE_HOME:-$HOME/.local/state}/pi-sandbox/launch.XXXXXXXX` (0700, removed on exit) |
-| Private caches | `${XDG_CACHE_HOME:-$HOME/.cache}/pi-sandbox` |
-| Screenshot artifacts | `${XDG_STATE_HOME:-$HOME/.local/state}/agent-sandbox/artifacts/run.XXXXXXXX/screenshots` (retained) |
-| nono config | `${XDG_CONFIG_HOME:-$HOME/.config}/nono` |
-| Installed layer profiles | `<nono config>/profiles/pi-sandbox-base-<sha12>.json`, `pi-sandbox-layer-<name>-<sha12>.json` |
+| Sandbox Profiles | `${XDG_CONFIG_HOME:-$HOME/.config}/nono/profiles/<name>.json` |
+| Pi sidecars | `${PI_SANDBOX_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/pi-sandbox}/profiles/<name>.toml` |
+| Credentials | `<engine config root>/credentials` by default |
+| Host hook data/executables | `<engine config root>/host` when configured |
+| Launch state | `${XDG_STATE_HOME:-$HOME/.local/state}/pi-sandbox/launch.XXXXXXXX`, private and removed on exit |
+| Private cache | `${XDG_CACHE_HOME:-$HOME/.cache}/pi-sandbox` |
+| Retained screenshots | `${XDG_STATE_HOME:-$HOME/.local/state}/agent-sandbox/artifacts/run.XXXXXXXX/screenshots` |
+| nono data | `${XDG_CONFIG_HOME:-$HOME/.config}/nono/{profiles,packages}` |
 
-The whole engine config root is denied inside the sandbox (read and write). Layers are applied
-in lexical order of their directory names; directory names match `[0-9]{2}-[a-z0-9][a-z0-9-]*`
-and the installed profile name is `pi-sandbox-layer-<directory name>-<sha12>`.
-Layer directories, `layers/`, and policy files must be user-owned, not symlinks,
-and not group/world-writable. Descriptor-relative opens use `O_NOFOLLOW`; file
-type, ownership, permissions, and (for files) `st_nlink == 1` are checked on the
-opened inode before TOML/JSON parsing. Hard-linked policy is refused even when the
-other pathname is outside the config root. Empty layer directories are ignored;
-any nonempty directory still requires `layer.toml`.
+The entire engine config root (including sidecars, credentials and host data) is denied inside
+nono. An overridden credentials directory is denied separately too.
+Content-addressed `pi-sandbox-…-<sha12>` names are reserved for engine snapshots;
+ordinary named Sandbox Profiles are never prune candidates.
 
-## Layer format (`layer.toml`, schema 1)
+## Pi sidecar schema
 
-Every key is optional except `schema`. Unknown keys are errors. Paths accept `~/`, `$HOME`,
-`$XDG_CONFIG_HOME`, `$XDG_DATA_HOME`, `$XDG_STATE_HOME`, `$XDG_CACHE_HOME` (with the standard
-defaults) and must be absolute after expansion.
+Every key is optional. There is no schema/version or metadata key. Unknown keys refuse with a
+native replacement hint where one exists. Every key below is allowed both at the top level and
+inside `platform.macos` / `platform.linux`; only `platform` itself cannot nest.
 
-```toml
-schema = 1
+| Key | Type / constraint |
+| --- | --- |
+| `pi.exclude_tools` | List of full Pi patterns matching `[A-Za-z0-9_*]+`. |
+| `pi.mcp.<logical>.hide_tools` | List of server-local tool names/patterns; nonempty, no whitespace, commas or controls; only `*` is wildcard. |
+| `pi.mcp.<logical>.names` | List of server aliases; logical names and aliases match `[A-Za-z0-9_-]+`. |
+| `pi.skill_packs` | List of absolute pack-directory paths. |
+| `notice.lines` | List of strings. |
+| `credentials.dir` | Absolute directory path. |
+| `credentials.env.<slot>.file` | Token filename relative to credentials.dir without `..`, or an absolute path. |
+| `credentials.env.<slot>.command` | Shell command string run outside nono, instead of file. |
+| `credentials.env.<slot>.env` | Environment identifier, required after merge. |
+| `credentials.env.<slot>.set` | String-to-string map of companion environment identifiers and values. |
+| `credentials.env.<slot>.missing`, `.notice` | Optional message strings; missing supports `{path}`. |
+| `workspace.scratch_root` | Absolute directory path. |
+| `workspace.worktree_root` | Absolute directory template, supports `{repo}`. |
+| `grants.protected_checkouts` | List of absolute checkout paths; RO plus write protection. |
+| `grants.runtime_dirs` | List of absolute directories, created private and granted RW. |
+| `grants.project_state_dirs` | Origin-URL-to-string-list map; paths relative to XDG state, without `..`, empty or `.`. |
+| `docker.socket` | Absolute socket path; enables routing and isolated Docker configuration. |
+| `integrations` | List from credential-stores, onepassword, cloud-credentials, keychain, agent-mcp. |
+| `hooks` | List of tables: nonempty string `name`, nonempty argv string-list `command`, optional `platforms` list from macos/linux (default both). |
 
-# Built-in integrations to enable (see Integrations)
-integrations = ["credential-stores", "onepassword", "cloud-credentials", "keychain", "agent-mcp"]
+A merged credential slot requires exactly one of `file` / `command` and `env`.
+Sidecar paths expand `~/`, `$HOME` and all four XDG home variables with standard defaults,
+and must be absolute afterward. Hook argv[0] expands `~`. Native JSON path/value expansion
+belongs to nono, including its additional supported variables.
 
-[layer]
-description = "Example organisation defaults"
+Sidecars merge in native traversal order. Each file's common settings merge first, then its
+current platform table immediately afterward. Tables merge recursively, lists append uniquely,
+later scalars win. Same-name hooks replace earlier hooks. Shared ancestors are revisited in a
+diamond (their scalars can override an earlier sibling); lists still deduplicate.
+This is not a second native policy resolver: only the Pi sidecars use this merge.
 
-[grants]
-ro_dirs = ["~/.agents"]              # read-only, skipped when absent
-rw_dirs = []                         # read-write, skipped when absent
-ro_files = ["~/.playwright/cli.config.json"]   # exact-file read-only (always granted, listed in the notice)
-ro_files_bypass = ["~/.config/herdr/config.toml"]  # file inside a denied directory: read-only + bypass_protection when present
-runtime_dirs = []                    # created (0700) at launch and granted read-write
-protected_checkouts = []             # read-only grant; macOS write floor on everything but .git; Linux grant-overlap floor
+For MCP exclusions, iterate logical key plus aliases, then hidden tool patterns, emitting
+`mcp__<normalized-server>__<normalized-pattern>`. Replace non-ASCII-alphanumeric/non-underscore
+characters with underscores, preserving `*` in tool patterns. Flat exclusions come first,
+then rendered MCP patterns, then CLI exclusions, de-duplicated into one flag.
 
-[grants.project_state_dirs]          # origin URL (without .git) -> dirs under $XDG_STATE_HOME, created and granted RW when the workdir's origin matches
-"https://github.com/example/app" = ["app-test-harness"]
+Only `doctor` reads `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/mcp.json` and, with `--workdir`,
+the project's `.pi/mcp.json`. Project entries override user entries by normalized name.
+Missing/unparsable files and unmatched logical server names warn without affecting status or policy.
+No server is connected to; extension-registered servers are not visible.
 
-[workspace]
-scratch_root = "~/Code/.scratch"     # enables --scratch
-worktree_root = "~/.local/share/git-worktrees/{repo}"  # {repo}: basename of the main checkout; created and granted RW when the workdir is in a Git repository whose common dir ends in /.git
+## Moving native policy into JSON
 
-[docker]
-socket = "~/.colima/default/docker.sock"   # absolute or ~; enables Docker routing (below)
+No numbered-directory discovery, layer TOML, fragments or compatibility shim remains.
 
-[network]
-remote_port_deny = [{ port = 8080, service = "example-service" }]   # macOS: deny the port on every host, reopen localhost
+| Former engine key | Native nono JSON field |
+| --- | --- |
+| `grants.ro_dirs` | `filesystem.read` |
+| `grants.rw_dirs` | `filesystem.allow` |
+| `grants.ro_files` | `filesystem.read_file` |
+| `grants.ro_files_bypass` | Both `filesystem.read_file` and `filesystem.bypass_protection` |
+| `env.pass` | `environment.allow_vars` |
+| `env.set` | `environment.set_vars` |
+| `env.unset` | `environment.deny_vars` |
+| `env.never_pass` | `environment.deny_vars`, with native `*` glob patterns |
+| `network.remote_port_deny` | `platform_overrides.macos.unsafe_macos_seatbelt_rules` |
 
-[credentials]
-dir = "~/.config/pi-sandbox/credentials"   # where token files live; denied inside the sandbox
+Native paths are not engine-filtered by existence: nono decides path handling.
+The former never-pass policy only blocked optional passthrough; native deny_vars filters
+**all inherited values**, even allowed ones. Native globs support anchored `*`, not Python
+fnmatch's `?` or bracket classes: enumerate names or use `*` deliberately. Native explicit
+set_vars and credential injection happen after filtering. This stricter inherited-value rule
+is deliberate; credential sidecar bridges remain explicit opt-ins.
 
-[credentials.env.jira]               # generic environment credential slot, keyed by name
-file = "jira.token"                  # relative to credentials.dir, or absolute; OR:
-# command = "security find-generic-password -w -s example"   # run outside the sandbox with sh -c
-env = "EXAMPLE_JIRA_TOKEN"           # variable the sandbox receives when the value is non-empty
-set = { EXAMPLE_URL = "https://example.atlassian.net" }      # also exported when the value is non-empty
-missing = "Jira off: no token at {path}"   # stderr notice when absent/empty; omitted = silent
-notice = "Jira is reachable read-only; it refuses writes. For a change, tell the user what to change."
-
-[env]
-pass = ["SOME_VAR"]                  # extra names allowed through from the caller's environment
-set = { DO_NOT_TRACK = "1" }         # nono environment.set_vars (nono expands $HOME etc.)
-unset = ["EXAMPLE_ADMIN_TOKEN"]      # removed from the environment before nono starts
-never_pass = ["EXAMPLE_*"]           # SANDBOX_ENV_PASS may never admit these (globs)
-
-[pi]
-exclude_tools = ["unsafe_*"]         # full Pi tool patterns ([A-Za-z0-9_*]+)
-skill_packs = []                     # extra pack directories whose Pi skills load only inside the sandbox
-
-[pi.mcp.example]                     # shared logical server key ([A-Za-z0-9_-]+)
-hide_tools = ["delete-*", "write.file"] # server-local tool names or * patterns
-names = ["local-example"]            # optional local aliases; example is always included
-
-[notice]
-lines = ["- Example: an extra rule the agent must follow."]
-
-[[hooks]]
-name = "listener-inventory"
-command = ["~/.local/libexec/pi-sandbox/listener-inventory"]
-platforms = ["macos"]                # default: both
-
-[platform.macos]                     # same keys as the top level (except schema/layer/platform), merged after this layer's top level on macOS
-[platform.linux]
-```
-
-**Merge.** Layers merge in order. Within one layer the top level merges first, then the
-current platform's table. Tables merge key by key; lists append with order-preserving
-de-duplication; scalars from later sources win. `[[hooks]]` entries append; a later hook with the
-same `name` replaces the earlier one. `credentials.env.<slot>` tables merge key by key, so a
-later layer can add `set` entries to an earlier slot (for example a per-user email).
-
-**MCP exclusions.** `pi.mcp.<logical>` is allowed at the top level and under
-`platform.macos` / `platform.linux`. Its only keys are `hide_tools` and `names`, both optional
-lists of strings. Each logical server's lists append with order-preserving de-duplication
-across layers and platform tables. Logical keys and aliases match `[A-Za-z0-9_-]+`.
-Tool patterns are server-local names as reported by the server, not full Pi names; empty
-strings, whitespace, commas (the Pi flag's CSV separator), and control characters are refused.
-Only `*` is a wildcard.
-
-For every logical server, iterate `[logical] + names`, then `hide_tools`, emitting
-`mcp__<normalized-server>__<normalized-pattern>`. Normalization replaces each character other
-than ASCII letters, digits, and `_` with `_`, preserving `*` only in tool patterns, matching
-Pi's naming rule. Thus server names differing only in `-` / `_` are equivalent, and tool names
-such as `write.file` or `api/remove` become `write_file` and `api_remove`. The logical key is
-always included even when aliases are supplied. Flat `pi.exclude_tools` patterns come first,
-then rendered MCP patterns, then CLI `--exclude-tools` / `-xt` patterns; the union is
-order-preserving and de-duplicated into one flag. Flat patterns remain supported for full Pi
-tool names, including non-MCP and package tools.
-
-`config --json` retains the declared `pi.mcp` table and `pi.exclude_tools` list and adds
-`pi.rendered_exclude_tools` for the combined layer-derived patterns (without CLI patterns).
-This computed field is output-only, not a layer key. The controller's `profile` output shows a
-wrapper script on stderr with the merged flag, using `pi` as a placeholder for the real
-executable. Stdout remains a native nono profile JSON document, usable by nono's resolver.
-
-**MCP doctor check.** Only `doctor` reads
-`${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/mcp.json`; with `--workdir DIR` (or `--workdir=DIR`),
-it also reads `DIR/.pi/mcp.json`. Project entries override user entries by normalized server
-name. It inspects only the `mcpServers` names, without connecting to servers, executing config
-commands, resolving credentials, or modifying either file. For each logical server with no
-configured name matching its logical key or aliases after normalization, it warns:
-
-```text
-pi.mcp.<logical>: no configured MCP server named <names>; its hidden tools match nothing (add names = [...] in your layer)
-```
-
-Missing, unreadable, or unparsable MCP files also produce warnings. These diagnostics never
-change the exit status, rendered exclusions, or policy; other doctor failures still fail.
-Servers registered by extensions are not visible to this check, so a warning is not proof that
-the server is absent from a Pi session. Configured-but-disabled servers still count as named
-entries. The launcher never reads Pi's MCP config.
-
-**`profile.json`.** A nono profile fragment. The engine rejects `extends`,
-`unsafe_macos_seatbelt_rules` (raw rules carry absolute paths: use hooks), `workdir`, and
-`meta.name` values other than the logical name `pi-sandbox-layer-<directory name>`;
-it injects that logical name when absent.
-
-Installed filenames use the first 12 hex characters of SHA-256 of the exact stored
-UTF-8 JSON bytes (sorted keys, two-space indent, trailing newline). Metadata keeps its
-logical name: hashing bytes that themselves contain the resulting hash would be circular.
-nono resolves the chain by filename. Base and layer profiles are published complete via
-exclusive hard-link creation and never overwritten. Existing content is read as raw
-bytes through a trusted descriptor-relative, no-follow binary read and compared with
-`json_bytes(value)` without decoding or newline normalization. LF-to-CRLF or LF-to-CR
-mutations are integrity failures even when they preserve JSON meaning. Text decoding
-for TOML/JSON parsing is separate from this exact-byte comparison.
-Launch/validate pin their profiles with shared advisory locks on read-only file
-descriptors; install/pin and pruning operations also share a short-lived store lock.
-Pruning requires a nonblocking exclusive lock on each candidate. This prevents another
-config root or prune from replacing or removing an in-flight chain, even across XDG
-state roots/filesystems. No writable hard-link aliases or state-file pins are created,
-and process exit automatically releases locks. Launch never deletes installed profiles.
-Only `setup` and explicit `prune` remove unreferenced `pi-sandbox-*.json` files,
-preserving the current chain, actively locked profiles, and all profiles modified in
-the last 24 hours.
+For port P, use these ordered macOS raw rules:
+`(deny network-outbound (remote ip "*:P"))` then
+`(allow network-outbound (remote ip "localhost:P"))`.
+Raw rules are ignored on Linux. Landlock has positive TCP port grants but no exact equivalent
+for denying one port on remote hosts while reopening localhost. There is no silent Linux
+translation: use native `network.block` plus explicit port grants if a stricter, different
+policy is acceptable, or enforce the exact restriction with an external firewall.
+Put the corresponding human-facing explanation in sidecar `notice.lines`.
 
 ## Built-in integrations
 
@@ -292,12 +219,12 @@ Names map one-to-one onto behaviours of the predecessor:
 
 | Integration | Effect |
 | --- | --- |
-| *(none: default)* | Denies `$HOME/.op` (profile) and raw read/write denies on `$XDG_CONFIG_HOME/op`, `incus`, `gcloud`. |
+| *(none: default)* | Denies `$HOME/.op` (native nono deny) and raw read/write denies on `$XDG_CONFIG_HOME/op`, `incus`, `gcloud`. |
 | `credential-stores` | Lifts those denies. |
 | `onepassword` | macOS: `~/.config/op` RW + bypass; 1Password group-container `Data/settings` RO + bypass; `~/.config/1Password` RO (each only when present). Linux: a non-empty `op-service-account.token` in the credentials dir is injected with nono's `--env-credential-map file://… PI_SANDBOX_OP_SERVICE_ACCOUNT_TOKEN`, renamed to `OP_SERVICE_ACCOUNT_TOKEN` by the Pi wrapper; `OP_CONFIG_DIR` is `<cache>/op`; inherited `OP_SERVICE_ACCOUNT_TOKEN` is unset. |
 | `cloud-credentials` | `~/.aws`, `~/.config/gcloud`, `~/.azure`, `~/.azd` RW when present; bypass for all but `.azd`. |
 | `keychain` | macOS, only when the GitHub token is present: `~/Library/Keychains` RW + bypass, `~/Library/Preferences/com.apple.security.plist` allow_file, `/Library/Keychains/System.keychain` read_file + bypass. |
-| `agent-mcp` | `$XDG_CONFIG_HOME/agent-mcp` RO (when present) and `~/.opentabs/extension/auth.json` read_file; without it, `$HOME/.config/agent-mcp` is denied in the profile and by raw rule. |
+| `agent-mcp` | `$XDG_CONFIG_HOME/agent-mcp` RO (when present) and `~/.opentabs/extension/auth.json` read_file; without it, `$HOME/.config/agent-mcp` is denied in the launch nono document and by raw rule. |
 
 ## Credentials
 
@@ -326,8 +253,8 @@ Docker never selects a platform credential helper; `cliPluginsExtraDirs` per OS 
 
 **Environment slots** (`credentials.env.*`) read a file or run a command outside the sandbox,
 then export `env` and `set` only when the value is non-empty, add a notice line when present
-and print `missing` when absent or empty. Slot variable names are added to `never_pass`
-automatically.
+and print `missing` when absent or empty. Slot variable names and companion names are cleared from inherited values and excluded from
+`SANDBOX_ENV_PASS`. Explicit bridges use nono credential injection, after environment filtering.
 
 **Git identity.** The launcher resolves `git -C <workdir> config user.name` / `user.email`
 outside the sandbox and passes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` when non-empty; a missing value
@@ -335,7 +262,7 @@ prints a notice and the launch continues.
 
 ## Hooks
 
-A hook runs outside the sandbox after grants are computed and before the profile is written.
+A hook runs outside the sandbox after grants are computed and before the launch nono document is written.
 argv is `command` (first element `~`-expanded). stdin is a JSON object:
 `{"schema": 1, "os": "macos"|"linux", "workdir": "...", "launch_dir": "...", "home": "..."}`.
 Exit 0 with stdout either empty or a JSON object
@@ -348,8 +275,8 @@ and the direct child is waited/reaped. stdout and stderr are each capped at 1 Mi
 The resolved executable, including symlink targets and PATH lookup, must lie outside
 every RW grant. Checks include potential token-enabled integration grants before
 credentials are read, plus macOS's common-Git grant and private runtime roots.
-A provisional credential-free profile is resolved with nono's manifest format to
-include RW grants from native layer fragments, the official pack, and groups.
+A provisional credential-free nono document is resolved with nono's manifest format to
+include RW grants from native Sandbox Profiles, the official pack, and groups.
 Unresolvable/malformed grant data refuses launch. Executable lookup preserves the
 invoked path/argv identity (notably virtual environments) while validating both that
 path and its canonical target. The resolved executable is opened without following
@@ -360,58 +287,44 @@ Hook argv/inline programs are trusted policy, not inferred or rewritten by the e
 
 ## Launch sequence
 
-1. Refuse when `NONO_CAP_FILE` is set. Split arguments. Resolve `pi` (absolute path), `nono`,
-   `git`. Resolve the workdir (`~`, absolute, real path) and apply the workdir refusals.
-2. Load and validate layers; resolve configuration for the current OS. Check the nono version
-   and the pinned pack's integrity. Compute the content-addressed profile chain.
-3. **Linux preflight** (Linux only): kernel `>= 6.12` (else refuse with the WSL update hint); on
-   WSL (`/proc/version` contains `microsoft`, case-insensitive) refuse any grant under
-   `/mnt/<drive>`. For a Git workdir: refuse the main checkout (`git-dir == common-dir`), refuse a
-   layout where `git-dir`'s parent is not `<common>/worktrees`, refuse active
-   `extensions.worktreeConfig`. Validate every caller grant against the floors: nono config
-   (default and XDG), zsh config (default and XDG), each `protected_checkouts`, the credentials
-   dir, the common Git dir and a custom hooks dir; refuse overlap in either direction and refuse
-   non-directories.
-4. Grants: RW = workdir, `--add-dirs`, worktree root, scratch, `rw_dirs`, runtime dirs, project
-   state dirs, integration grants; RO = `--add-dirs-ro`, `ro_dirs`, `protected_checkouts`,
-   built-in RO dirs (`$XDG_DATA_HOME/agent-browser/skills`, `$XDG_CONFIG_HOME/worktrunk`, when
-   present). Linux adds `<common>/{objects,refs,logs}` and the exact `<common>/worktrees/<name>`
-   RW, `<common>` and the worktree root RO. macOS adds the nono tokens `@git:common-dir` (allow)
-   and `@git:worktree` (read). macOS also grants `$XDG_STATE_HOME/mise` RW when it differs from
-   the default.
-5. Resolve Git identity. Allocate the launch, artifact, runtime, browser
-   (`/tmp/sab.XXXXXXXX`) and tmux (`/tmp/pst.XXXXXXXX`) directories (0700, real paths).
-   Install and pin the immutable profile chain. Validate hook executable locations and
-   run hooks **before any credential file or slot command is read/executed**.
-6. Read credentials and run env-slot commands; finish token-dependent grants; write
-   `gh`/`docker`/`gitconfig`. Grant the launch dir RO; grant its `gh`, `docker`,
-   private cache, socket roots, artifacts and runtime dirs RW.
-7. macOS raw rules, in this order: Git rules for the workdir, remote port denies, hook rules,
-   host rules, then static floors (below, preserving their internal order). Later Seatbelt
-   rules win: the static floors must remain last.
-8. Write `<launch>/notice.md` and `<launch>/bin/pi`; prepend `<launch>/bin` to `PATH`.
-9. Write `<launch>/profile.json`: `extends` the chain; `meta.name` `pi-sandbox-launch`;
-   `workdir.access` `readwrite`; `filesystem.allow/read/allow_file/read_file/bypass_protection`;
-   `unix_socket` for the Docker socket (macOS); `environment.allow_vars/set_vars`;
-   `unsafe_macos_seatbelt_rules` (macOS).
-10. macOS, tokenless: Keychain preflight (below); refuse on failure.
-11. Change into the workdir and run, with the `unset` list removed from the environment:
-    macOS `nono wrap --profile <profile> --allow-cwd -- pi <args>`; Linux `nono run --silent
-    --profile <profile> --allow-cwd --suppress-save-prompt <launch> --suppress-save-prompt
-    <cache> [credential maps] -- pi <args>`. `nono run` is never used on macOS: it starts a
-    debug-level unified-log stream that stalls Endpoint Security clients system-wide.
-12. Cleanup (always, including after signals): stop tmux servers by explicit socket path,
-    close agent-browser sessions in the private socket root, remove both roots and the launch
-    dir. Artifacts are retained.
+1. Refuse nested nono; split arguments; locate Pi/nono/Git; validate the real workdir.
+2. Select the Sandbox Profile, load native user inheritance and merge Pi sidecars.
+   Check nono version and pinned pack integrity; compute the immutable graph.
+3. On Linux require kernel >=6.12; on WSL refuse grants on /mnt/<drive>. Git launches require
+   linked worktrees, the standard private Git-dir layout and inactive extensions.worktreeConfig.
+   Caller grants must be directories and must not overlap protected policy, checkouts, credential
+   or Git paths in either direction. Resolve the selected native filesystem writes with nono too:
+   project the native diagnostic filesystem into a temporary native document with optional nono groups
+   excluded and required deny groups retained, then resolve its manifest. Validate those paths against the same floors, preserving
+   native path expansion without confusing implicit group or intentional engine Git grants.
+4. Compute engine-dependent grants: workdir, CLI dirs, scratch/worktree/runtime/project-state
+   roots, protected checkouts and integrations. Native static grants remain in Sandbox Profiles.
+   Linux adds common objects/refs/logs and private worktree metadata RW, common metadata and
+   main checkout RO. macOS adds @git:common-dir RW and @git:worktree RO, and an overridden
+   XDG state mise directory RW.
+5. Resolve Git identity. Allocate private launch/artifact/runtime/browser/tmux roots.
+   Install/pin the complete snapshot graph; write the launch prefix; resolve a provisional
+   native manifest before credentials. Use its RW grants to validate sidecar hook locations.
+   Execute hooks before any token file or credential command.
+6. Read credentials, finish conditional grants, write isolated gh/Docker/Git config, build
+   environment and render the Pi wrapper and notice. Launch directory is RO except private
+   gh/Docker subdirectories; cache/socket/artifact/runtime roots are RW.
+7. Write the top nono document. macOS ordering is Git → native user rules → hook → host → static.
+   On tokenless macOS launches verify effective Keychain denial without querying Keychain.
+8. Run `nono wrap --profile <launch>/profile.json --allow-cwd [credential maps] -- pi <args>`
+   on macOS. On Linux use `nono run --silent --profile <launch>/profile.json --allow-cwd
+   --suppress-save-prompt <launch> --suppress-save-prompt <cache> [credential maps] -- pi <args>`.
+   Never use nono run on macOS: its debug log stream stalls Endpoint Security clients.
+9. Always clean launch and owned socket roots; stop tmux only by explicit socket path.
+   Keep retained artifacts and installed native snapshots.
 
-**Docker.** With `docker.socket` set: `DOCKER_HOST=unix://<socket>`,
-`TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock`,
-`JAVA_TOOL_OPTIONS=-Ddocker.host=unix://<socket>`, `DOCKER_CONFIG=<launch>/docker`; macOS adds a
-`unix_socket` grant. On both platforms an existing socket receives a `bypass_protection` entry. `DOCKER_CONTEXT`,
-`DOCKER_TLS_VERIFY` and `DOCKER_CERT_PATH` are unset. Without it, `DOCKER_CONFIG` is still
-private and the notice says Docker is not configured.
+With `docker.socket`: set DOCKER_HOST, TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE and
+JAVA_TOOL_OPTIONS to the selected socket, keep DOCKER_CONFIG private, and on macOS grant
+unix_socket access. An existing socket receives bypass_protection on both platforms.
+Clear DOCKER_CONTEXT, DOCKER_TLS_VERIFY and DOCKER_CERT_PATH. Without routing, Docker
+configuration is still private and the notice says Docker is not configured.
 
-## Base profile (`pi-sandbox-base`)
+## Engine base nono profile (`pi-sandbox-base`)
 
 Extends `nolabs-ai/pi`. Groups include `mise_manager`, `go_runtime`, `java_runtime`,
 `bun_runtime`. Reads: `$XDG_DATA_HOME/agent-extensions`, `~/.local/pipx`, `~/.rbenv`, `~/.rvm`,
@@ -419,7 +332,7 @@ Extends `nolabs-ai/pi`. Groups include `mise_manager`, `go_runtime`, `java_runti
 `~/.local/share/containers`, `~/.config/containers`, `~/.config/incus`, `~/.config/lxc`,
 `~/.config/gh`, `$XDG_CONFIG_HOME/pi-sandbox` (and the default path), `~/.pg_service.conf`,
 `~/.pgpass`, `~/.pypirc`, plus the integration-dependent denies (those are added to the
-per-launch profile, not the base). macOS override: exclude group `user_caches_macos`,
+per-launch nono document, not the base). macOS override: exclude group `user_caches_macos`,
 `security.ipc_mode` `full`, reads of `~/Library/Preferences/.GlobalPreferences*`, `ByHost`, the
 Chrome / Chrome for Testing / Chromium preference plists, read_file `~/.CFUserTextEncoding`,
 denies `~/Library/Containers/com.docker.docker`, `~/Library/Application Support/Mozilla`.
@@ -427,10 +340,10 @@ Linux override: exclude `user_caches_linux`, allow `/dev/shm`.
 
 ## Raw Seatbelt rules (macOS)
 
-The effective order is **Git rules → remote port denies → hook rules → host rules →
-static floors**. nono 0.80 resolved the predecessor's per-launch rules before the old
-user profile's platform-override rules. Preserve that resolved order, not the old file
-layout: later SBPL rules win, so static floors are applied last.
+The effective order is **Git rules → Sandbox Profile rules (including remote port denies) →
+hook rules → host rules → static floors**. The launch-local prefix holds Git rules in its common
+block; the launch top holds the safety tail in its platform override. This preserves the order
+through nono 0.80's final platform-override merge. Later SBPL rules win.
 
 **Static floors, applied last** (absolute paths resolved at launch):
 
@@ -460,38 +373,38 @@ then host rules: read/write deny on `$XDG_CONFIG_HOME/pi-sandbox`, the credentia
 `$XDG_DATA_HOME/{mise,uv,agent-extensions,agent-browser/skills}`,
 `~/.local/share/agent-browser/skills`, `$XDG_CONFIG_HOME/{zsh,worktrunk}`,
 `$XDG_STATE_HOME/mise/{trusted-configs,ignored-configs}`, `<launch>/gitconfig`,
-`<launch>/profile.json`; and write-deny on `$XDG_CACHE_HOME` except the private cache.
+`<launch>/profile.json`, `<launch>/engine.json`; and write-deny on `$XDG_CACHE_HOME` except the private cache.
 
 `nono why` cannot see raw rules; the notice says so.
 
 ## Environment
 
-`environment.allow_vars` = the base list (`HOME PATH SHELL TMPDIR USER LOGNAME PWD TERM
-COLORTERM TERM_PROGRAM TERM_PROGRAM_VERSION EDITOR VISUAL TMP TEMP LANG LC_* (each) TZ
-XDG_{CONFIG,CACHE,STATE,DATA}_HOME HTTP(S)_PROXY NO_PROXY (both cases) NODE_EXTRA_CA_CERTS
-NO_BROWSER PLAYWRIGHT_MCP_SANDBOX SDKROOT USERNAME TMUX_TMPDIR AGENT_BROWSER_SKILLS_DIR`), the
-launcher's own variables (Git isolation: `GH_CONFIG_DIR GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
-GIT_CONFIG_COUNT GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false`;
-caches; Docker; agent-browser `AGENT_BROWSER_SOCKET_DIR PI_AGENT_BROWSER_SOCKET_DIR
-AGENT_BROWSER_SCREENSHOT_DIR AGENT_BROWSER_ARGS=--no-sandbox,--no-startup-window`;
-`MISE_CACHE_DIR`, `BUN_RUNTIME_TRANSPILER_CACHE_PATH`; this list must match the predecessor's
-exactly), every set `PI_ASK_USER_*`, `PI_CLIPBOARD_OSC52` when set
-or when launched from SSH/mosh, credential variables when non-empty, `[env].pass`, and
-`SANDBOX_ENV_PASS` names that are valid identifiers and not matched by `never_pass`.
-`environment.set_vars` carries `JAVA_TOOL_OPTIONS`, `GEM_HOME`, `GEM_PATH` (nono strips them
-from the inherited environment; refuse a launch whose values contain `$`) and `[env].set`.
-Cache redirection: npm, uv (`UV_CACHE_DIR`, `UV_TOOL_DIR`), pip, yarn, pnpm, corepack, bun,
-cargo, go, gradle, maven, gems, bundle under the private cache.
+The engine supplies a narrow base allowlist (HOME/PATH/shell/terminal/locale/XDG/proxy variables),
+its own launch variables, existing PI_ASK_USER_* and clipboard support, and valid identifier names
+from SANDBOX_ENV_PASS. Credential bridge names cannot be restored through passthrough.
+Sandbox Profiles add native environment.allow_vars/deny_vars/set_vars; nono owns matching.
 
-Built-in unset list: `HERDR_ENV SSH_AUTH_SOCK GITHUB_TOKEN GH_ENTERPRISE_TOKEN
-GITHUB_ENTERPRISE_TOKEN GH_DEBUG GIT_CONFIG_PARAMETERS TMUX TMUX_PANE DOCKER_CONTEXT
-DOCKER_TLS_VERIFY DOCKER_CERT_PATH`, plus `[env].unset`.
+All nonsecret engine isolation values are also set_vars in the final platform override, so a
+Sandbox Profile cannot redirect Git/gh/Docker config, browser/tmux roots, caches or launch identity.
+This includes JAVA_TOOL_OPTIONS, GEM_HOME and GEM_PATH, which nono strips from ordinary inherited
+values. Refuse dollar signs in engine-generated set values to avoid unintended native expansion.
+Other user set_vars retain nono's child-key-wins rules. Nonsecret cache redirections cover npm,
+uv/uv-tools, pip, yarn, pnpm, corepack, bun, cargo, go, gradle, maven, gems and bundle.
 
-Unsetting `HERDR_ENV` and leaving `HERDR_SOCKET_PATH`/`HERDR_PANE_ID` off the allowlist disables
-Herdr's Pi integration inside the sandbox on purpose: Herdr's socket can run commands in
-unsandboxed panes. Herdr then classifies the pane by screen detection, which cannot see a waiting
-question. `TERM_PROGRAM` still passes, so a Pi extension can render the session's state on screen
-for a matching Herdr detection manifest; the engine provides neither.
+GH_TOKEN and configured credential-slot values never enter JSON or argv: argv contains only
+`--env-credential-map env://NAME NAME`. They are injected by nono after environment filtering,
+so an explicit sidecar bridge works even when inherited NAME matches a deny glob.
+Linux's 1Password bridge retains its file:// reference and wrapper rename.
+No secret values appear in snapshots, notice, Pi wrapper or Git config.
+
+Built-in removals before nono: HERDR_ENV, SSH_AUTH_SOCK, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN,
+GITHUB_ENTERPRISE_TOKEN, GH_DEBUG, GIT_CONFIG_PARAMETERS, TMUX, TMUX_PANE, DOCKER_CONTEXT,
+DOCKER_TLS_VERIFY and DOCKER_CERT_PATH. Native deny_vars filters the child rather than removing
+variables from the host process that executes nono.
+
+Herdr integration stays disabled inside nono; its socket can control unsandboxed panes.
+Herdr must classify the pane by screen detection, which cannot see a waiting question.
+TERM_PROGRAM still passes for an extension/detection-manifest pairing; the engine supplies neither.
 
 ## Pi wrapper and notice
 
@@ -504,14 +417,14 @@ the pack's `package.json` `pi.skills`, default `skills`); `--append-system-promp
 The notice has two parts: a static policy section (sandbox denial = stop and report; ask for a
 wider launch before a detour; Git config/hooks/protected checkouts/Pi config are write-blocked
 by rules `nono why` cannot see (macOS) or the Linux equivalent; Linux socket exposure; GitHub
-read-only and publish outside; Docker rule; removed tools exist on purpose) plus each layer's
+read-only and publish outside; Docker rule; removed tools exist on purpose) plus the merged sidecar's
 `notice.lines`, credential-slot notices and hook notices; and a per-launch section listing
-read-write and read-only grants, runtime dirs, screenshots, and subagent rules (private tmux
+engine-added read-write and read-only grants, runtime dirs, screenshots, and subagent rules (private tmux
 server only; never Herdr panes or the host's tmux). It never lists removed tool names.
 
 ## Keychain preflight (macOS, tokenless launches)
 
-Resolve the per-launch profile with `nono profile show <profile> --format manifest` and
+Resolve the per-launch nono document with `nono profile show <profile> --format manifest` and
 `--json` (from the workdir). Refuse unless the manifest denies both `~/Library/Keychains` (as
 `$HOME` or real path) and `/Library/Keychains`, no `bypass_protection` entry matches
 `Keychains`, and no raw rule starting with `(allow` mentions `Keychains` or
@@ -541,8 +454,8 @@ inside. `setup` never removes other packs.
 nono 0.80's lockfile records the installed `profiles/pi.json` artifact's SHA-256
 separately from the pack version. The retained `.nono-trust.bundle` maps signed
 `policy.json` to that installed path with the same digest. Launch and setup verify the
-profile bytes against the lockfile digest; missing/malformed metadata, a mismatch,
-or malformed profile JSON is a refusal. The profile's own `meta.version` is not the
+nono profile bytes against the lockfile digest; missing/malformed metadata, a mismatch,
+or malformed nono profile JSON is a refusal. The nono document's own `meta.version` is not the
 pack version. This is local integrity checking of nono's installed metadata, not a
 replacement signature verifier. `nono trust verify` verifies instruction-file bundles
 against a project trust policy, not the installed-pack layout; no suitable pack
@@ -552,9 +465,10 @@ nono pull's responsibility; corruption is repaired through nono or refused.
 ## Implementation decisions
 
 - Dry-run `profile` uses stable `launch.preview` and socket/artifact placeholders,
-  does not create directories, and reads neither credentials nor Git identity.
+  installs immutable nono snapshots but creates no launch/runtime directories and reads neither
+  credentials nor Git identity. Its stderr includes the launch-local prefix document and invocation.
   It does not run hooks: arbitrary outside-sandbox commands are not a safe preview.
-  `validate` syncs profiles and uses an ephemeral resolver profile; it never launches Pi.
+  `validate` syncs native snapshots and uses an ephemeral resolver nono document; it never launches Pi.
 - Hook stdin requires a real launch directory. It is allocated before hooks run and
   removed on refusal. Scratch/runtime directories are prepared first; retained artifacts
   may therefore exist even when a later hook or Keychain preflight refuses. Credential
@@ -570,10 +484,10 @@ nono pull's responsibility; corruption is repaired through nono or refused.
   nono's inheritance, group, platform, and write-grant semantics in a custom resolver.
   The bounded hook supervisor uses selectors because `subprocess.run/communicate`
   cannot cap output or tear down an owned descendant group by themselves. Shared
-  file locks pin profiles without requiring config/state to share a filesystem or
+  file locks pin native snapshots without requiring config/state to share a filesystem or
   introducing writable hard-link aliases; hard links are used only for atomic publish
-  inside the protected profile store.
-- The nono lockfile and installed profile must both confirm the pinned pack.
+  inside the protected nono profile store.
+- The nono lockfile and installed pack's nono profile must both confirm the pin.
   Setup preserves unrelated pack entries and changes only this pack's skill filter.
 - Private temporary roots use exclusive 0700 mkdir with eight cryptographically random
   alphanumeric characters, preserving the predecessor's socket-path naming contract.
@@ -587,13 +501,13 @@ nono pull's responsibility; corruption is repaired through nono or refused.
   entry point shipped only under `tests/`. Native entry-point checks and live doctor
   tests retain host detection and real kernel/Landlock checks.
   No environment variable relaxes a production preflight. CI excludes the live marker;
-  normal local `mise run test` includes it.
+  `just test` excludes it too; run `just exec uv run pytest tests/live` explicitly.
 
 ## Testing
 
 - **unit**: config merge and validation, path expansion, Seatbelt quoting, argument split,
   notice/wrapper rendering, env allowlist, Keychain preflight predicate, hook protocol.
-- **integration** (any OS, no real nono): stub `nono` records argv, profile and effective
+- **integration** (any OS, no real nono): stub `nono` records argv, nono document and effective
   environment; stub `pi`; both OS code paths through an injectable platform seam. Covers
   everything the predecessor's stub tier covered: grant separation, merged exclusions, notice,
   workdir change, refusals, credential slots (present/empty/absent), Keychain refusal paths,

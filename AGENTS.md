@@ -2,10 +2,10 @@
 
 Read [docs/design.md](docs/design.md) before changing launch behavior; it is the
 contract. Runtime dependencies are standard-library only. Keep user/host policy
-in layers and examples generic.
+in native Sandbox Profiles and optional Pi sidecars; keep examples generic.
 
-Use `mise tasks` for gates. `lint` includes strict pyright; `test` includes
-real-nono tests when available. Platform injection lives only in
+Use `just check` for gates (including strict pyright). `just test` runs unit and
+stub integrations; run `just exec uv run pytest tests/live` for real-nono tests. Platform injection lives only in
 `tests/entry.py`; the shipped CLI must never read test override variables.
 
 Run probes only in isolated fixture HOME/XDG roots. Live fixtures belong under
