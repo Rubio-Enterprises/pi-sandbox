@@ -3,20 +3,24 @@ import os
 import pytest
 
 from pi_sandbox import Refusal, hooks
-from pi_sandbox.config import load_layer
+from pi_sandbox.config import discover
 from tests.support import executable
 
 
-@pytest.mark.parametrize('name', ['layer.toml', 'profile.json'])
+@pytest.mark.parametrize('name', ['toml', 'json'])
 def test_hardlinked_policy_is_refused_before_parsing(fixture, name):
-    directory = fixture.layer('95-hardlink', 'schema = 1\n', {})
-    source = directory / name
+    fixture.sandbox_profile('hardlink', '', {})
+    source = (
+        (fixture.paths.root if name == 'toml' else fixture.paths.nono)
+        / 'profiles'
+        / ('hardlink.' + name)
+    )
     source.write_bytes(b'not valid TOML or JSON')
     alias = fixture.repo / name
     alias.hardlink_to(source)
     assert source.stat().st_nlink == 2
     with pytest.raises(Refusal, match='exactly one hard link'):
-        load_layer(directory, fixture.paths)
+        discover(fixture.paths, 'hardlink')
 
 
 def test_hardlinked_user_hook_is_refused(fixture):

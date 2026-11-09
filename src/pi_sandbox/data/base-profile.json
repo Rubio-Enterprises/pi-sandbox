@@ -2,7 +2,7 @@
   "extends": "nolabs-ai/pi",
   "meta": {
     "name": "pi-sandbox-base",
-    "description": "Accident-prevention layer over the official Pi pack"
+    "description": "Accident-prevention base over the official Pi pack"
   },
   "groups": {
     "include": ["mise_manager", "go_runtime", "java_runtime", "bun_runtime"]

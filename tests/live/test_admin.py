@@ -14,8 +14,13 @@ def test_examples_validate_and_setup_is_idempotent(live):
     fixture = live
     platform = Platform.detect()
     ctl = partial(fixture.ctl, os_name=platform.os, release=platform.release, wsl=platform.wsl)
-    shutil.rmtree(fixture.paths.root / 'layers')
-    shutil.copytree(REPO / 'examples/layers', fixture.paths.root / 'layers')
+    shutil.rmtree(fixture.paths.root / 'profiles')
+    for source in (REPO / 'examples/profiles').iterdir():
+        root = fixture.paths.nono if source.suffix == '.json' else fixture.paths.root
+        target = root / 'profiles' / source.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    fixture.env['PI_SANDBOX_PROFILE'] = 'pi-machine'
     file(
         fixture.paths.home / '.pi/agent/settings.json', json.dumps({'packages': ['unrelated-pack']})
     )

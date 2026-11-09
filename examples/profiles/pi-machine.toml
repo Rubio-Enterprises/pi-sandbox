@@ -1,0 +1,8 @@
+[docker]
+socket = "~/.colima/default/docker.sock"
+
+[platform.linux.docker]
+socket = "/var/run/docker.sock"
+
+[platform.macos.notice]
+lines = ["- Port 8080 is blocked on remote hosts; localhost is allowed."]

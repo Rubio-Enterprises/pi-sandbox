@@ -22,8 +22,8 @@ def test_missing_tools_before_state(fixture, name):
 
 
 @pytest.mark.parametrize('os_name', ['macos', 'linux'])
-def test_no_layers_is_conservative(fixture, os_name):
-    shutil.rmtree(fixture.paths.root / 'layers')
+def test_no_sandbox_profile_is_conservative(fixture, os_name):
+    fixture.env.pop('PI_SANDBOX_PROFILE')
     shutil.rmtree(fixture.paths.root / 'credentials')
     result = fixture.run(os_name, extra={'GH_TOKEN': 'human', 'DOCKER_HOST': 'unix:///host'})
     assert result.returncode == 0, result.stderr
@@ -31,7 +31,7 @@ def test_no_layers_is_conservative(fixture, os_name):
     from pi_sandbox.config import Config
     from pi_sandbox.profile import chain
 
-    assert cap['profile']['extends'] == chain(Config(fixture.paths))
+    assert cap['profile']['extends'] == [*chain(Config(fixture.paths)), 'engine']
     assert 'GH_TOKEN' not in cap['env'] and 'DOCKER_HOST' not in cap['env']
     assert 'Keychains' not in json.dumps(cap['profile']['filesystem']['bypass_protection'])
     assert 'Docker is not configured' in cap['notice']
@@ -45,8 +45,8 @@ def test_only_existing_docker_socket_bypasses(fixture):
         socket_path = Path(name).resolve() / 'docker.sock'
         with socket.socket(socket.AF_UNIX) as server:
             server.bind(str(socket_path))
-            fixture.layer(
-                '95-socket', 'schema = 1\n[docker]\nsocket = ' + json.dumps(str(socket_path))
+            fixture.sandbox_profile(
+                '95-socket', '[docker]\nsocket = ' + json.dumps(str(socket_path))
             )
             result = fixture.run()
             assert result.returncode == 0, result.stderr

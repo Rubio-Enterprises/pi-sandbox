@@ -57,8 +57,8 @@ def pack_cache():
 def live(pack_cache):
     with tempfile.TemporaryDirectory(prefix='live.', dir=CACHE) as name:
         fixture = make_fixture(Path(name))
-        shutil.rmtree(fixture.paths.nono)
-        shutil.copytree(pack_cache / '.config/nono', fixture.paths.nono)
+        shutil.rmtree(fixture.paths.nono / 'packages')
+        shutil.copytree(pack_cache / '.config/nono/packages', fixture.paths.nono / 'packages')
         for binary in ('nono', 'tmux', 'agent-browser'):
             (fixture.bins / binary).unlink()
         yield fixture

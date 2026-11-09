@@ -1,0 +1,10 @@
+[workspace]
+scratch_root = "~/Code/.scratch"
+worktree_root = "$XDG_DATA_HOME/git-worktrees/{repo}"
+
+[pi.mcp.example]
+hide_tools = ["delete-*", "write.file"]
+names = ["local-example"]
+
+[notice]
+lines = ["- Example service access is read-only."]

@@ -44,14 +44,14 @@ def test_real_boundaries(live, org, token):
     paths = fixture.paths
     platform = Platform.detect()
     if not org:
-        shutil.rmtree(paths.root / 'layers/10-org')
-        host = paths.root / 'layers/90-host/layer.toml'
+        (paths.root / 'profiles/org.toml').unlink()
+        host = paths.root / 'profiles/host.toml'
         content = host.read_text()
-        host.write_text('schema = 1\n' + content[content.index('[credentials.env.inference]') :])
+        host.write_text('' + content[content.index('[credentials.env.inference]') :])
     if not token:
         (paths.root / 'credentials/pi-sandbox-github.token').unlink()
     # The protected checkout is also the worktree's actual main checkout
-    user = paths.root / 'layers/50-user/layer.toml'
+    user = paths.root / 'profiles/user.toml'
     user.write_text(user.read_text().replace('"~/protected"', json.dumps(str(fixture.repo))))
     workdir = fixture.linked
     if platform.os == 'macos' and not token:

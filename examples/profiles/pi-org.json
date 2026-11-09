@@ -1,0 +1,16 @@
+{
+  "meta": {
+    "name": "pi-org"
+  },
+  "environment": {
+    "deny_vars": ["EXAMPLE_ADMIN_*"]
+  },
+  "platform_overrides": {
+    "macos": {
+      "unsafe_macos_seatbelt_rules": [
+        "(deny network-outbound (remote ip \"*:8080\"))",
+        "(allow network-outbound (remote ip \"localhost:8080\"))"
+      ]
+    }
+  }
+}

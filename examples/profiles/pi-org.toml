@@ -1,0 +1,9 @@
+[credentials.env.example]
+file = "example.token"
+env = "EXAMPLE_SERVICE_TOKEN"
+set = { EXAMPLE_SERVICE_URL = "https://service.example" }
+missing = "Example service off: no token at {path}"
+notice = "- Use the example service read-only."
+
+[pi]
+exclude_tools = ["unsafe_*"]

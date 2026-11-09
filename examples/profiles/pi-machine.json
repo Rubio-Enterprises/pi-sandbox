@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "name": "pi-machine"
+  },
+  "extends": ["pi-org", "pi-user"]
+}

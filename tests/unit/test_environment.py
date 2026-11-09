@@ -60,7 +60,8 @@ def test_allowlist_and_set_vars(config):
     assert not {'*', '1BAD', 'BAD-NAME'} & set(env.allow)
     for name in CACHES:
         assert env.inherited[name].startswith(str(config.paths.private_cache))
-    assert set(env.set_vars) == {'JAVA_TOOL_OPTIONS', 'GEM_HOME', 'GEM_PATH'}
+    assert {'JAVA_TOOL_OPTIONS', 'GEM_HOME', 'GEM_PATH', *CACHES} <= set(env.set_vars)
+    assert 'GH_TOKEN' not in env.set_vars
     assert 'GH_TOKEN' not in env.allow and 'GH_TOKEN' not in env.inherited
 
 
@@ -110,7 +111,7 @@ def test_credential_function_matrix(fixture, states, os):
         assert any(name.title() + ' is reachable' in line for line in creds.notices) == enabled
     assert ('EXAMPLE_URL' in env.inherited) == any(state == 'present' for state in states[:2])
     assert ('EXAMPLE_EMAIL' in env.inherited) == any(state == 'present' for state in states[:2])
-    assert 'EXAMPLE_ADMIN_TOKEN' not in env.inherited
+    assert env.inherited['EXAMPLE_ADMIN_TOKEN'] == 'caller'
     assert 'SAFE' in env.allow
 
 

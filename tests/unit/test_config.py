@@ -4,9 +4,9 @@ import tomllib
 import pytest
 
 from pi_sandbox import Refusal
-from pi_sandbox.config import Layer, merge, resolve, validate_profile, validate_section
+from pi_sandbox.config import SandboxProfile, merge, resolve, validate_section
 from pi_sandbox.paths import Paths
-from pi_sandbox.profile import sync
+from pi_sandbox.profile import snapshots, sync
 
 
 def test_merge_has_no_aliases_and_preserves_order():
@@ -21,9 +21,9 @@ def test_merge_has_no_aliases_and_preserves_order():
 
 
 def test_platform_merge_and_slot_extension(paths):
-    layers = [
-        Layer(
-            '10-org',
+    profiles = [
+        SandboxProfile(
+            'org',
             paths.root,
             {
                 'credentials': {
@@ -33,8 +33,8 @@ def test_platform_merge_and_slot_extension(paths):
                 'platform': {'linux': {'notice': {'lines': ['linux']}}},
             },
         ),
-        Layer(
-            '50-user',
+        SandboxProfile(
+            'user',
             paths.root,
             {
                 'credentials': {'env': {'one': {'set': {'EMAIL': 'user'}}}},
@@ -42,7 +42,7 @@ def test_platform_merge_and_slot_extension(paths):
             },
         ),
     ]
-    config = resolve(paths, 'linux', layers)
+    config = resolve(paths, 'linux', profiles)
     assert config.slots['one'] == {
         'file': 'one',
         'env': 'TOKEN',
@@ -54,45 +54,29 @@ def test_platform_merge_and_slot_extension(paths):
 @pytest.mark.parametrize(
     'value',
     [
-        {},
         {'schema': True},
         {'schema': 2},
-        {'schema': 1, 'unknown': []},
-        {'schema': 1, 'platform': {'windows': {}}},
-        {'schema': 1, 'layer': {'integrations': []}},
-        {'schema': 1, 'env': {'pass': ['*']}},
-        {'schema': 1, 'env': {'set': {'1BAD': 'x'}}},
-        {'schema': 1, 'grants': {'ro_dirs': ['relative']}},
-        {'schema': 1, 'pi': {'exclude_tools': ['hyphen-name']}},
-        {'schema': 1, 'integrations': ['unknown']},
-        {'schema': 1, 'hooks': [{'name': 'x', 'command': []}]},
-        {'schema': 1, 'hooks': [{'name': 'x', 'command': ['true'], 'platforms': ['windows']}]},
-        {'schema': 1, 'network': {'remote_port_deny': [{'port': 0, 'service': 'x'}]}},
-        {'schema': 1, 'network': {'remote_port_deny': [{'port': True, 'service': 'x'}]}},
-        {'schema': 1, 'network': {'remote_port_deny': [{'port': 65536, 'service': 'x'}]}},
-        {'schema': 1, 'credentials': {'env': {'slot': {'file': '../bad', 'env': 'TOKEN'}}}},
-        {'schema': 1, 'grants': {'project_state_dirs': {'origin': ['../escape']}}},
-        {'schema': 1, 'platform': {'linux': {'schema': 1}}},
+        {'unknown': []},
+        {'platform': {'windows': {}}},
+        {'layer': {'integrations': []}},
+        {'env': {'pass': ['*']}},
+        {'env': {'set': {'1BAD': 'x'}}},
+        {'grants': {'ro_dirs': ['relative']}},
+        {'pi': {'exclude_tools': ['hyphen-name']}},
+        {'integrations': ['unknown']},
+        {'hooks': [{'name': 'x', 'command': []}]},
+        {'hooks': [{'name': 'x', 'command': ['true'], 'platforms': ['windows']}]},
+        {'network': {'remote_port_deny': [{'port': 0, 'service': 'x'}]}},
+        {'network': {'remote_port_deny': [{'port': True, 'service': 'x'}]}},
+        {'network': {'remote_port_deny': [{'port': 65536, 'service': 'x'}]}},
+        {'credentials': {'env': {'slot': {'file': '../bad', 'env': 'TOKEN'}}}},
+        {'grants': {'project_state_dirs': {'origin': ['../escape']}}},
+        {'platform': {'linux': {'schema': 1}}},
     ],
 )
 def test_invalid_schema(paths, value):
     with pytest.raises(Refusal):
         validate_section(value, paths, 'fixture', root=True)
-
-
-@pytest.mark.parametrize(
-    'value',
-    [
-        {'extends': 'default'},
-        {'workdir': {}},
-        {'unsafe_macos_seatbelt_rules': []},
-        {'platform_overrides': {'macos': {'workdir': {}}}},
-        {'meta': {'name': 'other'}},
-    ],
-)
-def test_profile_fragment_restrictions(value):
-    with pytest.raises(Refusal):
-        validate_profile(value, 'pi-sandbox-layer-10-org', 'profile')
 
 
 @pytest.mark.parametrize('value', ['~/path', '$HOME/path', '${HOME}/path'])
@@ -124,18 +108,18 @@ def test_invalid_paths(paths, value):
 
 def test_discovery_profile_sync_preserves_existing_profiles(fixture):
     config = resolve(fixture.paths, 'macos')
-    assert [layer.name for layer in config.layers] == ['10-org', '50-user', '90-host']
+    assert [item.name for item in config.profiles] == ['org', 'user', 'host']
     sync(config)
     root = fixture.paths.nono / 'profiles'
-    installed = root / (config.layers[1].profile_name + '.json')
-    assert json.loads(installed.read_text())['meta']['name'] == 'pi-sandbox-layer-50-user'
+    installed = root / (list(snapshots(config))[2] + '.json')
+    assert json.loads(installed.read_text())['meta']['name'] == 'user'
     before = installed.stat().st_mtime_ns
     sync(config)
     assert installed.stat().st_mtime_ns == before
-    (root / 'pi-sandbox-layer-00-stale.json').write_text('{}')
+    (root / 'pi-sandbox-user-00-stale.json').write_text('{}')
     (root / 'unrelated.json').write_text('{}')
     sync(config)
-    assert (root / 'pi-sandbox-layer-00-stale.json').exists()
+    assert (root / 'pi-sandbox-user-00-stale.json').exists()
     assert (root / 'unrelated.json').exists()
 
 
@@ -145,13 +129,15 @@ def test_discovery_profile_sync_preserves_existing_profiles(fixture):
 def test_incomplete_merged_slot_refused(paths, slot):
     with pytest.raises(Refusal):
         resolve(
-            paths, 'macos', [Layer('10-org', paths.root, {'credentials': {'env': {'slot': slot}}})]
+            paths,
+            'macos',
+            [SandboxProfile('org', paths.root, {'credentials': {'env': {'slot': slot}}})],
         )
 
 
-def test_example_layers_parse(fixture):
+def test_example_profiles_parse(fixture):
     from tests.support import REPO
 
-    for directory in (REPO / 'examples/layers').glob('*'):
-        value = tomllib.loads((directory / 'layer.toml').read_text())
+    for directory in (REPO / 'examples/profiles').glob('*.toml'):
+        value = tomllib.loads(directory.read_text())
         validate_section(value, fixture.paths, str(directory), root=True)

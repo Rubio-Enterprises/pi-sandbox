@@ -4,16 +4,16 @@ import pytest
 
 from pi_sandbox import Refusal, profile
 from pi_sandbox import paths as path_tools
-from pi_sandbox.config import Config, Layer
+from pi_sandbox.config import Config, SandboxProfile
 
 
 def configuration(paths):
     return Config(
         paths,
         [
-            Layer('10-org', paths.root, {}, {'filesystem': {'deny': ['/example/secret']}}),
-            Layer(
-                '50-user',
+            SandboxProfile('org', paths.root, {}, {'filesystem': {'deny': ['/example/secret']}}),
+            SandboxProfile(
+                'user',
                 paths.root,
                 {},
                 {
@@ -26,7 +26,7 @@ def configuration(paths):
 
 
 @pytest.mark.parametrize('separator', [b'\r\n', b'\r'], ids=['crlf', 'cr'])
-@pytest.mark.parametrize('kind', ['base', 'layer'])
+@pytest.mark.parametrize('kind', ['base', 'user'])
 def test_existing_profile_newline_mutation_is_refused(paths, separator, kind):
     config = configuration(paths)
     profile.sync(config)
@@ -47,7 +47,7 @@ def test_every_installed_profile_name_hashes_its_stored_bytes(paths):
     profile.sync(config)
     profile.sync(config)
     installed = sorted((paths.nono / 'profiles').glob('pi-sandbox-*.json'))
-    assert {path.stem for path in installed} == set(profile.chain(config))
+    assert {path.stem for path in installed} == set(profile.snapshots(config))
     for target in installed:
         assert target.stem.rsplit('-', 1)[1] == hashlib.sha256(target.read_bytes()).hexdigest()[:12]
 

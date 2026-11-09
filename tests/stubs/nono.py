@@ -5,12 +5,46 @@ import socket
 import sys
 from pathlib import Path
 
+from pi_sandbox.config import merge
+from pi_sandbox.paths import Paths
+
+paths = Paths.from_env(os.environ)
+root = paths.nono / 'profiles'
+
+
+def resolved(path):
+    value = json.loads(path.read_text())
+    result = {}
+    bases = value.get('extends', [])
+    for name in [bases] if isinstance(bases, str) else bases:
+        source = path.parent / (name + '.json')
+        if not source.is_file():
+            source = root / (name + '.json')
+        if source.is_file():
+            result = merge(result, resolved(source))
+    return merge(result, value)
+
+
+def effective(path):
+    value = resolved(path)
+    override = value.pop('platform_overrides', {}).get(os.environ.get('TEST_OS', 'macos'), {})
+    value = merge(value, override)
+    for key, entries in value.get('filesystem', {}).items():
+        value['filesystem'][key] = [
+            paths.expand(p) if p.startswith(('~', '$')) else p for p in entries
+        ]
+    return value
+
+
 out = Path(os.environ['TEST_OUT'])
 args = sys.argv[1:]
 with (out / 'calls').open('a') as stream:
     stream.write(json.dumps(args) + '\n')
 if args == ['--version']:
     print(os.environ.get('TEST_NONO_VERSION', 'nono 0.80.0'))
+    raise SystemExit(0)
+if args[:2] == ['profile', 'groups']:
+    print('[]')
     raise SystemExit(0)
 if args[:2] == ['profile', 'validate']:
     raise SystemExit(0)
@@ -23,7 +57,7 @@ if args[:2] == ['profile', 'show']:
             if os.environ.get('TEST_DROP_DENY')
             else [{'path': str(Path.home() / 'Library/Keychains')}, {'path': '/Library/Keychains'}]
         )
-        p = json.loads(Path(args[2]).read_text())
+        p = effective(Path(args[2]))
         grants = []
         root = (
             Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'nono/profiles'
@@ -46,13 +80,14 @@ if args[:2] == ['profile', 'show']:
                         grants.append({'path': path, 'access': 'readwrite', 'type': 'directory'})
 
         collect(p)
-        grants += [
-            {'path': str(Path.home() / '.pi'), 'access': 'readwrite'},
-            {'path': str(Path.home() / '.config/nono/profile-drafts'), 'access': 'readwrite'},
-        ]
+        if p.get('meta', {}).get('name') != 'pi-sandbox-grant-check':
+            grants += [
+                {'path': str(Path.home() / '.pi'), 'access': 'readwrite'},
+                {'path': str(Path.home() / '.config/nono/profile-drafts'), 'access': 'readwrite'},
+            ]
         print(json.dumps({'filesystem': {'deny': deny, 'grants': grants}}))
     else:
-        p = json.loads(Path(args[2]).read_text())
+        p = effective(Path(args[2]))
         if os.environ.get('TEST_BYPASS'):
             p['filesystem']['bypass_protection'].append('$HOME/Library/Keychains')
         if os.environ.get('TEST_RAW_ALLOW'):
@@ -63,18 +98,26 @@ if args[:2] == ['profile', 'show']:
     raise SystemExit(0)
 assert args[0] in ('run', 'wrap'), args
 path = Path(args[args.index('--profile') + 1])
-profile = json.loads(path.read_text())
+profile = effective(path)
 env = {
     k: v
     for k, v in os.environ.items()
     if any(fnmatch.fnmatchcase(k, pattern) for pattern in profile['environment']['allow_vars'])
+    and not any(
+        fnmatch.fnmatchcase(k, pattern) for pattern in profile['environment'].get('deny_vars', [])
+    )
     and k not in ('JAVA_TOOL_OPTIONS', 'GEM_HOME', 'GEM_PATH')
 }
 env.update(profile['environment']['set_vars'])
 env['NONO_CAP_FILE'] = '/fixture/nono-cap'
-if '--env-credential-map' in args:
-    i = args.index('--env-credential-map')
-    env[args[i + 2]] = Path(args[i + 1].removeprefix('file://')).read_text().rstrip('\n')
+for i, arg in enumerate(args):
+    if arg == '--env-credential-map':
+        source, name = args[i + 1 : i + 3]
+        env[name] = (
+            os.environ[source[6:]]
+            if source.startswith('env://')
+            else Path(source.removeprefix('file://')).read_text().rstrip('\n')
+        )
 build = path.parent / 'docker/buildx/config/ghcr.io/config.json'
 capture = dict(
     profile=profile,

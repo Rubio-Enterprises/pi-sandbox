@@ -103,16 +103,6 @@ def git_rules(workdir: Path, git: Git | None) -> list[str]:
     return rules
 
 
-def port_rules(config: Config) -> list[str]:
-    rules: list[str] = []
-    for entry in config.block('network').get('remote_port_deny', []):
-        rules += [
-            f'(deny network-outbound (remote ip "*:{entry["port"]}"))',
-            f'(allow network-outbound (remote ip "localhost:{entry["port"]}"))',
-        ]
-    return rules
-
-
 def host_rules(config: Config, launch: Path) -> list[str]:
     paths = config.paths
     denied = [paths.root, config.credentials_dir]
@@ -134,6 +124,7 @@ def host_rules(config: Config, launch: Path) -> list[str]:
         paths.state / 'mise/ignored-configs',
         launch / 'gitconfig',
         launch / 'profile.json',
+        launch / 'engine.json',
     ]
     for target in readonly:
         rules += [

@@ -2,7 +2,6 @@ import base64
 import json
 import os
 import pty
-import shutil
 import signal
 import subprocess
 import sys
@@ -24,10 +23,10 @@ def assert_clean(capture):
 @pytest.mark.parametrize('org,token', [(True, True), (True, False), (False, True), (False, False)])
 def test_full_launch_contract(fixture, os_name, org, token):
     if not org:
-        shutil.rmtree(fixture.paths.root / 'layers/10-org')
-        host = fixture.paths.root / 'layers/90-host/layer.toml'
+        (fixture.paths.root / 'profiles/org.toml').unlink()
+        host = fixture.paths.root / 'profiles/host.toml'
         content = host.read_text()
-        host.write_text('schema = 1\n' + content[content.index('[credentials.env.inference]') :])
+        host.write_text('' + content[content.index('[credentials.env.inference]') :])
     if not token:
         (fixture.paths.root / 'credentials/pi-sandbox-github.token').unlink()
     extra_rw, extra_ro = fixture.root / 'rw with space', fixture.root / 'ro with space'
@@ -182,7 +181,7 @@ def test_full_launch_contract(fixture, os_name, org, token):
             assert str(common / suffix) in fs['allow']
         assert str(fixture.linked) in fs['read']
         assert env['DOCKER_HOST'] == 'unix:///var/run/docker.sock'
-        assert ('--env-credential-map' in cap['argv']) == org
+        assert ('PI_SANDBOX_OP_SERVICE_ACCOUNT_TOKEN' in cap['argv']) == org
         assert ('OP_SERVICE_ACCOUNT_TOKEN' in pi['env']) == org
         assert 'PI_SANDBOX_OP_SERVICE_ACCOUNT_TOKEN' not in pi['env']
         assert 'Unix sockets are NOT isolated' in cap['notice']
@@ -245,7 +244,7 @@ def test_linux_op_token_state(fixture, state):
     token.write_text('\n') if state == 'empty' else token.unlink()
     result = fixture.run('linux', extra={'OP_SERVICE_ACCOUNT_TOKEN': 'human'})
     assert result.returncode == 0, result.stderr
-    assert '--env-credential-map' not in fixture.capture()['argv']
+    assert 'PI_SANDBOX_OP_SERVICE_ACCOUNT_TOKEN' not in fixture.capture()['argv']
     pi = json.loads((fixture.out / 'pi.json').read_text())
     assert 'OP_SERVICE_ACCOUNT_TOKEN' not in pi['env']
 
@@ -293,7 +292,7 @@ def test_early_refusals(fixture, kind):
     elif kind == 'scratch':
         args = ['--scratch=../bad']
     elif kind == 'no-scratch-root':
-        shutil.rmtree(fixture.paths.root / 'layers/50-user')
+        (fixture.paths.root / 'profiles/user.toml').unlink()
         args = ['--scratch=effort']
     elif kind == 'pack':
         (fixture.paths.nono / 'packages/lockfile.json').unlink()
@@ -438,10 +437,9 @@ def test_browser_cleanup_only_private_pool(fixture, browser, expected):
 
 
 def test_slot_command_shell_stderr_and_missing(fixture):
-    fixture.layer(
+    fixture.sandbox_profile(
         '95-command',
-        """schema = 1
-[credentials.env.inference]
+        """[credentials.env.inference]
 command = "echo should-not-leak >&2; exit 1"
 """,
     )
@@ -461,15 +459,17 @@ command = "echo should-not-leak >&2; exit 1"
 def test_ctl_commands_and_dry_run(fixture, os_name):
     ctl = partial(fixture.ctl, os_name=os_name)
     assert ctl('pack').stdout == 'nolabs-ai/pi@0.2.2\n'
-    layers = ctl('layers')
-    assert layers.returncode == 0 and layers.stdout.count('\tvalid') == 3
+    chain = ctl('chain')
+    assert chain.returncode == 0 and chain.stdout.count('\tsidecar:') == 3
     result = ctl('config', '--json')
     assert (
         result.returncode == 0
-        and json.loads(result.stdout)['credentials']['env']['first']['set']['EXAMPLE_EMAIL']
+        and json.loads(result.stdout)['sidecar']['credentials']['env']['first']['set'][
+            'EXAMPLE_EMAIL'
+        ]
     )
     runtime = fixture.paths.home / 'runtime' / ('mac' if os_name == 'macos' else 'linux')
-    assert json.loads(result.stdout)['grants']['runtime_dirs'] == [str(runtime)]
+    assert json.loads(result.stdout)['sidecar']['grants']['runtime_dirs'] == [str(runtime)]
     workdir = fixture.linked if os_name == 'linux' else fixture.repo
     result = ctl('profile', '--workdir=' + str(workdir))
     assert result.returncode == 0, result.stderr
@@ -478,9 +478,9 @@ def test_ctl_commands_and_dry_run(fixture, os_name):
     assert 'fixture' not in json.dumps(value['environment']['set_vars'])
     assert not list(fixture.paths.launch_state.glob('launch.*'))
     assert ctl('validate').returncode == 0
-    fixture.layer('99-invalid', 'schema = 1\nunknown = true\n')
-    result = ctl('layers')
-    assert result.returncode and '99-invalid' in result.stdout and 'unknown key' in result.stdout
+    fixture.sandbox_profile('99-invalid', 'unknown = true\n')
+    result = ctl('chain')
+    assert result.returncode and '99-invalid' in result.stderr and 'unknown key' in result.stderr
 
 
 @pytest.mark.parametrize('release,status', [('6.11.99', 2), ('6.12.0', 0)])
@@ -492,5 +492,7 @@ def test_ctl_profile_uses_injected_kernel_preflight(fixture, release, status):
     if status:
         assert 'Linux >= 6.12' in result.stderr
     else:
-        assert not json.loads(result.stdout)['unsafe_macos_seatbelt_rules']
+        assert not json.loads(result.stdout)['platform_overrides']['linux'][
+            'unsafe_macos_seatbelt_rules'
+        ]
     assert not list(fixture.paths.launch_state.glob('launch.*'))

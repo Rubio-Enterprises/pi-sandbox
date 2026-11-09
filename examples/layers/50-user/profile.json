@@ -1,5 +1,0 @@
-{
-  "filesystem": {
-    "deny": ["$HOME/.config/example-control"]
-  }
-}

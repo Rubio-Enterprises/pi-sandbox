@@ -5,8 +5,8 @@ from dataclasses import replace
 import pytest
 
 from pi_sandbox.cli import split
-from pi_sandbox.config import Config, Layer
-from pi_sandbox.launch import preview
+from pi_sandbox.config import Config, SandboxProfile
+from pi_sandbox.launch import plan, prefix, preview
 from pi_sandbox.paths import atomic_json
 from pi_sandbox.platform import Platform
 from pi_sandbox.profile import sync
@@ -15,20 +15,20 @@ from tests.support import executable, file
 pytestmark = pytest.mark.live
 
 
-def test_two_config_native_resolution_keeps_original_read_only_layer(live):
+def test_two_config_native_resolution_keeps_original_read_only_snapshot(live):
     fixture = live
     sensitive = fixture.paths.home / 'other-project'
     sensitive.mkdir()
     strict = Config(
         fixture.paths,
         [
-            Layer(
-                '50-user',
+            SandboxProfile(
+                'user',
                 fixture.paths.root,
                 {},
                 {
                     'filesystem': {'read': [str(sensitive)]},
-                    'meta': {'name': 'pi-sandbox-layer-50-user'},
+                    'meta': {'name': 'pi-sandbox-user-50-user'},
                 },
             )
         ],
@@ -36,13 +36,13 @@ def test_two_config_native_resolution_keeps_original_read_only_layer(live):
     permissive = Config(
         replace(fixture.paths, root=fixture.paths.home / 'other-config'),
         [
-            Layer(
-                '50-user',
+            SandboxProfile(
+                'user',
                 fixture.paths.root,
                 {},
                 {
                     'filesystem': {'allow': [str(sensitive)]},
-                    'meta': {'name': 'pi-sandbox-layer-50-user'},
+                    'meta': {'name': 'pi-sandbox-user-50-user'},
                 },
             )
         ],
@@ -51,7 +51,9 @@ def test_two_config_native_resolution_keeps_original_read_only_layer(live):
     workdir = fixture.linked if platform.os == 'linux' else fixture.repo
     sync(strict)
     path = fixture.out / 'strict.json'
-    atomic_json(path, preview(strict, platform, split(['--workdir=' + str(workdir)])))
+    options = split(['--workdir=' + str(workdir)])
+    atomic_json(path.parent / 'engine.json', prefix(strict, plan(strict, platform, options)))
+    atomic_json(path, preview(strict, platform, options))
     sync(permissive)
     result = subprocess.run(
         ['nono', 'profile', 'show', str(path), '--json'],
@@ -64,17 +66,17 @@ def test_two_config_native_resolution_keeps_original_read_only_layer(live):
     assert str(sensitive) in fs['read'] and str(sensitive) not in fs['allow']
 
 
-def test_real_nono_refuses_layer_link_into_rw_project_before_child(live):
+def test_real_nono_refuses_sidecar_link_into_rw_project_before_child(live):
     fixture = live
-    target = fixture.repo / 'policy'
-    file(target / 'layer.toml', 'schema = 1\n')
-    (fixture.paths.root / 'layers/95-linked').symlink_to(target, target_is_directory=True)
-    executable(
-        fixture.bins / 'pi', '#!/bin/sh\nprintf changed >> ' + str(target / 'layer.toml') + '\n'
-    )
+    target = file(fixture.repo / 'policy.toml', '')
+    fixture.sandbox_profile('linked')
+    sidecar = fixture.paths.root / 'profiles/linked.toml'
+    sidecar.unlink()
+    sidecar.symlink_to(target)
+    executable(fixture.bins / 'pi', '#!/bin/sh\nprintf changed >> ' + str(target) + '\n')
     result = fixture.run(Platform.detect().os, '--add-dirs-ro=' + str(fixture.bins))
     assert result.returncode == 2
-    assert (target / 'layer.toml').read_text() == 'schema = 1\n'
+    assert target.read_text() == ''
 
 
 def test_live_pack_tampering_is_refused(live):
@@ -107,15 +109,15 @@ def test_real_nono_sigint_disposition_is_not_inherited_ignored(live):
     assert result.stdout == 'False\n'
 
 
-@pytest.mark.parametrize('source', ['native-layer', 'pi-pack'])
+@pytest.mark.parametrize('source', ['native-profile', 'pi-pack'])
 def test_native_manifest_blocks_writable_hook_sources(live, source):
     fixture = live
     directory = fixture.paths.home / ('.pi/runtime' if source == 'pi-pack' else 'profile-rw')
     hook = executable(directory / 'hook', '#!/bin/sh\nexit 0\n')
-    fragment = {'filesystem': {'allow': [str(directory)]}} if source == 'native-layer' else None
-    fixture.layer(
+    fragment = {'filesystem': {'allow': [str(directory)]}} if source == 'native-profile' else None
+    fixture.sandbox_profile(
         '95-hook',
-        'schema = 1\n[[hooks]]\nname = "inventory"\ncommand = ' + json.dumps([str(hook)]) + '\n',
+        '[[hooks]]\nname = "inventory"\ncommand = ' + json.dumps([str(hook)]) + '\n',
         fragment,
     )
     result = fixture.run(Platform.detect().os)

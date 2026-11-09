@@ -6,20 +6,16 @@ from dataclasses import replace
 import pytest
 
 from pi_sandbox import Refusal, pack, profile
-from pi_sandbox.config import Config, Layer, discover, resolve
+from pi_sandbox.config import Config, SandboxProfile, discover, resolve
 from tests.support import file
 
 
-@pytest.mark.parametrize('target', ['layers', 'directory', 'layer.toml', 'profile.json'])
-def test_layer_symlinks_are_refused(fixture, target):
-    layers = fixture.paths.root / 'layers'
-    path = (
-        layers
-        if target == 'layers'
-        else layers / '50-user'
-        if target == 'directory'
-        else layers / '50-user' / target
-    )
+@pytest.mark.parametrize('target', ['sidecar-directory', 'nono-directory', 'toml', 'json'])
+def test_policy_symlinks_are_refused(fixture, target):
+    root = fixture.paths.root if target in ('toml', 'sidecar-directory') else fixture.paths.nono
+    path = root / 'profiles'
+    if target in ('toml', 'json'):
+        path /= 'user.' + target
     destination = fixture.repo / 'linked-policy'
     path.rename(destination)
     path.symlink_to(destination, target_is_directory=destination.is_dir())
@@ -27,23 +23,20 @@ def test_layer_symlinks_are_refused(fixture, target):
         discover(fixture.paths)
 
 
-@pytest.mark.parametrize('name', ['layer.toml', 'profile.json'])
+@pytest.mark.parametrize('kind', ['toml', 'json'])
 @pytest.mark.parametrize('mode', [0o620, 0o602, 0o666])
-def test_writable_layer_files_are_refused(fixture, name, mode):
-    (fixture.paths.root / 'layers/50-user' / name).chmod(mode)
+def test_writable_policy_files_are_refused(fixture, kind, mode):
+    root = fixture.paths.root if kind == 'toml' else fixture.paths.nono
+    (root / 'profiles' / ('user.' + kind)).chmod(mode)
     with pytest.raises(Refusal, match='writable'):
         discover(fixture.paths)
 
 
-def test_empty_layer_is_ignored_but_nonempty_malformed_is_not(fixture):
-    directory = fixture.paths.root / 'layers/95-empty'
-    directory.mkdir()
+def test_unselected_sidecars_are_never_discovered(fixture):
+    file(fixture.paths.root / 'profiles/unselected.toml', 'invalid')
     assert len(discover(fixture.paths)) == 3
-    result = fixture.ctl('layers')
-    assert result.returncode == 0 and 'empty, ignored' in result.stdout
-    file(directory / 'unexpected')
-    with pytest.raises(Refusal):
-        discover(fixture.paths)
+    result = fixture.ctl('chain')
+    assert result.returncode == 0 and 'unselected.toml' not in result.stdout
 
 
 def test_two_configs_cannot_replace_or_remove_another_chain(paths):
@@ -51,13 +44,13 @@ def test_two_configs_cannot_replace_or_remove_another_chain(paths):
     a = Config(
         paths,
         [
-            Layer(
-                '50-user',
+            SandboxProfile(
+                'user',
                 paths.root,
                 {},
                 {
                     'filesystem': {'read': [str(sensitive)]},
-                    'meta': {'name': 'pi-sandbox-layer-50-user'},
+                    'meta': {'name': 'pi-sandbox-user-50-user'},
                 },
             )
         ],
@@ -65,13 +58,13 @@ def test_two_configs_cannot_replace_or_remove_another_chain(paths):
     b = Config(
         replace(paths, root=paths.home / 'other-config'),
         [
-            Layer(
-                '50-user',
+            SandboxProfile(
+                'user',
                 paths.root,
                 {},
                 {
                     'filesystem': {'allow': [str(sensitive)]},
-                    'meta': {'name': 'pi-sandbox-layer-50-user'},
+                    'meta': {'name': 'pi-sandbox-user-50-user'},
                 },
             )
         ],
@@ -115,9 +108,9 @@ def test_pack_integrity_rejects_corruption(fixture, mutation):
         pack.require(fixture.paths)
 
 
-@pytest.mark.parametrize('name', ['layers', 'layers/50-user'])
+@pytest.mark.parametrize('name', ['sidecar', 'nono'])
 def test_writable_policy_directories_are_refused(fixture, name):
-    (fixture.paths.root / name).chmod(0o777)
+    ((fixture.paths.root if name == 'sidecar' else fixture.paths.nono) / 'profiles').chmod(0o777)
     with pytest.raises(Refusal, match='writable'):
         discover(fixture.paths)
 
@@ -145,14 +138,14 @@ def test_foreign_owned_policy_is_refused(fixture, monkeypatch):
 def test_symlink_swap_at_file_open_is_refused(fixture, monkeypatch):
     from pi_sandbox import paths as module
 
-    target = fixture.paths.root / 'layers/50-user/layer.toml'
+    target = fixture.paths.root / 'profiles/user.toml'
     inode = target.parent.stat().st_ino
-    source = file(fixture.repo / 'policy.toml', 'schema = 1\n')
+    source = file(fixture.repo / 'policy.toml', '')
     real = os.open
     swapped = []
 
     def swapping(name, flags, mode=0o777, *, dir_fd=None):
-        if name == 'layer.toml' and dir_fd is not None and os.fstat(dir_fd).st_ino == inode:
+        if name == 'user.toml' and dir_fd is not None and os.fstat(dir_fd).st_ino == inode:
             assert flags & os.O_NOFOLLOW
             target.unlink()
             target.symlink_to(source)
@@ -168,19 +161,21 @@ def test_symlink_swap_at_file_open_is_refused(fixture, monkeypatch):
 def test_prune_retains_recent_current_and_pinned_profiles(paths):
     import time
 
-    a = Config(paths, [Layer('50-user', paths.root, {}, {'filesystem': {'read': ['/strict']}})])
+    a = Config(
+        paths, [SandboxProfile('user', paths.root, {}, {'filesystem': {'read': ['/strict']}})]
+    )
     b = Config(
         replace(paths, root=paths.home / 'config-b'),
-        [Layer('50-user', paths.root, {}, {'filesystem': {'allow': ['/permissive']}})],
+        [SandboxProfile('user', paths.root, {}, {'filesystem': {'allow': ['/permissive']}})],
     )
     handles = profile.sync(a, pin=True)
     profile.sync(b)
     root = paths.nono / 'profiles'
-    stale = file(root / 'pi-sandbox-layer-00-stale.json', '{}')
+    stale = file(root / 'pi-sandbox-user-stale-000000000000.json', '{}')
     old = time.time() - 2 * 24 * 60 * 60
     for path in root.glob('pi-sandbox-*.json'):
         os.utime(path, (old, old))
-    recent = file(root / 'pi-sandbox-layer-00-recent.json', '{}')
+    recent = file(root / 'pi-sandbox-user-recent-000000000000.json', '{}')
     unrelated = file(root / 'another-profile.json', '{}')
     os.utime(unrelated, (old, old))
     assert profile.prune(b) == 1
@@ -189,7 +184,7 @@ def test_prune_retains_recent_current_and_pinned_profiles(paths):
     assert all((root / (name + '.json')).exists() for name in profile.chain(b))
     profile.release(handles)
     assert profile.prune(b) == 1
-    assert not (root / (a.layers[0].profile_name + '.json')).exists()
+    assert not (root / (profile.chain(a)[-1] + '.json')).exists()
 
 
 def test_native_credentials_deny_only_when_outside_engine_root(fixture):

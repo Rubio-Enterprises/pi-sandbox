@@ -119,13 +119,11 @@ def build(
         own['PI_CLIPBOARD_OSC52'] = clipboard
         allow.append('PI_CLIPBOARD_OSC52')
     never = [
-        *config.entries('env', 'never_pass'),
         *slot_vars,
         'GH_TOKEN',
         'PI_SANDBOX_OP_SERVICE_ACCOUNT_TOKEN',
         'PI_SANDBOX_INFERENCE_API_KEY',
     ]
-    allow += config.entries('env', 'pass')
     allow += [
         name
         for name in caller.get('SANDBOX_ENV_PASS', '').split()
@@ -150,10 +148,13 @@ def build(
     env['PATH'] = str(launch / 'bin') + ':' + caller.get('PATH', '')
     env['PWD'] = str(workdir)
     allow += BASE_VARS
-    set_vars = {name: own[name] for name in ('JAVA_TOOL_OPTIONS', 'GEM_HOME', 'GEM_PATH')}
+    set_vars = {
+        name: value
+        for name, value in own.items()
+        if name not in credentials.env and name != 'GH_TOKEN'
+    }
     if any('$' in value for value in set_vars.values()):
         raise Refusal('launch paths must not contain $')
-    set_vars.update(config.block('env').get('set', {}))
-    for name in [*UNSET, *config.entries('env', 'unset')]:
+    for name in UNSET:
         env.pop(name, None)
     return Environment(env, list(dict.fromkeys(allow)), set_vars)

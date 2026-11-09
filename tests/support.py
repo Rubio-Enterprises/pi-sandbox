@@ -58,12 +58,15 @@ class Fixture:
             check=True,
         ).stdout.strip()
 
-    def layer(self, name, content, profile=None):
-        directory = self.paths.root / 'layers' / name
-        file(directory / 'layer.toml', content)
-        if profile is not None:
-            file(directory / 'profile.json', json.dumps(profile))
-        return directory
+    def sandbox_profile(self, name, content='', profile=None):
+        value = dict(profile or {})
+        value.setdefault('meta', {'name': name})
+        if name != 'org':
+            value.setdefault('extends', self.env.get('PI_SANDBOX_PROFILE', 'org'))
+        file(self.paths.nono / 'profiles' / (name + '.json'), json.dumps(value))
+        sidecar = file(self.paths.root / 'profiles' / (name + '.toml'), content)
+        self.env['PI_SANDBOX_PROFILE'] = name
+        return sidecar
 
     def command(self, os_name='macos', *args, release='6.12.0', wsl=False):
         return [
@@ -81,7 +84,7 @@ class Fixture:
         (self.out / 'capture.json').unlink(missing_ok=True)
         return subprocess.run(
             self.command(os_name, *args, **kwargs),
-            env=self.env | (extra or {}),
+            env=self.env | {'TEST_OS': os_name} | (extra or {}),
             capture_output=True,
             text=True,
             timeout=30,
@@ -101,7 +104,7 @@ class Fixture:
                 'yes' if wsl else 'no',
                 *args,
             ],
-            env=self.env,
+            env=self.env | {'TEST_OS': os_name},
             capture_output=True,
             text=True,
             timeout=30,
@@ -172,13 +175,11 @@ def make_fixture(root):
     ):
         file(home / name / 'fixture')
     file(home / '.config/herdr/config.toml')
-    fixture.layer(
-        '10-org',
-        """schema = 1
-integrations = ["credential-stores", "onepassword", "cloud-credentials", "keychain", "agent-mcp"]
-[env]
-unset = ["EXAMPLE_ADMIN_TOKEN"]
-never_pass = ["EXAMPLE_*", "CHAT_*"]
+    fixture.sandbox_profile(
+        'org',
+        """integrations = [
+  "credential-stores", "onepassword", "cloud-credentials", "keychain", "agent-mcp"
+]
 [credentials.env.first]
 file = "first.token"
 env = "EXAMPLE_FIRST_TOKEN"
@@ -201,14 +202,11 @@ notice = "- Chat is reachable read-only; it refuses writes."
 [pi]
 exclude_tools = ["mcp__example__delete_*"]
 """,
+        {'environment': {'deny_vars': ['EXAMPLE_ADMIN_TOKEN', 'EXAMPLE_*', 'CHAT_*']}},
     )
-    fixture.layer(
-        '50-user',
-        """schema = 1
-[grants]
-ro_dirs = ["~/context", "$XDG_DATA_HOME/agent-browser/skills"]
-ro_files = ["~/instructions.md"]
-ro_files_bypass = ["~/.config/herdr/config.toml"]
+    fixture.sandbox_profile(
+        'user',
+        """[grants]
 protected_checkouts = ["~/protected"]
 [workspace]
 scratch_root = "~/scratch"
@@ -222,12 +220,18 @@ runtime_dirs = ["~/runtime/mac"]
 [platform.linux.grants]
 runtime_dirs = ["~/runtime/linux"]
 """,
-        {'filesystem': {'deny': ['$HOME/.config/herdr']}},
+        {
+            'filesystem': {
+                'deny': ['$HOME/.config/herdr'],
+                'read': ['~/context', '$XDG_DATA_HOME/agent-browser/skills'],
+                'read_file': ['~/instructions.md', '~/.config/herdr/config.toml'],
+                'bypass_protection': ['~/.config/herdr/config.toml'],
+            }
+        },
     )
-    fixture.layer(
-        '90-host',
-        """schema = 1
-[credentials.env.first.set]
+    fixture.sandbox_profile(
+        'host',
+        """[credentials.env.first.set]
 EXAMPLE_EMAIL = "fixture@example.invalid"
 [credentials.env.second.set]
 EXAMPLE_EMAIL = "fixture@example.invalid"
@@ -239,9 +243,17 @@ missing = "local inference key unavailable; local models cannot authenticate"
 socket = "~/.d/s"
 [platform.linux.docker]
 socket = "/var/run/docker.sock"
-[network]
-remote_port_deny = [{port=8080, service="example-service"}]
 """,
+        {
+            'platform_overrides': {
+                'macos': {
+                    'unsafe_macos_seatbelt_rules': [
+                        '(deny network-outbound (remote ip "*:8080"))',
+                        '(allow network-outbound (remote ip "localhost:8080"))',
+                    ]
+                }
+            }
+        },
     )
     output = json.dumps(
         {
@@ -250,7 +262,7 @@ remote_port_deny = [{port=8080, service="example-service"}]
         }
     )
     hook = executable(bins / 'inventory', f'#!{sys.executable}\nprint({output!r})\n')
-    host = paths.root / 'layers/90-host/layer.toml'
+    host = paths.root / 'profiles/host.toml'
     with host.open('a') as stream:
         stream.write(
             '[[hooks]]\nname = "inventory"\ncommand = ['
@@ -276,5 +288,7 @@ remote_port_deny = [{port=8080, service="example-service"}]
 
 
 @pytest.fixture
-def fixture(tmp_path):
-    return make_fixture(tmp_path)
+def fixture(tmp_path, monkeypatch):
+    result = make_fixture(tmp_path)
+    monkeypatch.setenv('PI_SANDBOX_PROFILE', 'host')
+    return result

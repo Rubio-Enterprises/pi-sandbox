@@ -69,11 +69,6 @@ def notice(
             'code (settings, MCP/model config, extensions, packages, skills) are blocked '
             'by rules `nono why` cannot see; EPERM there is intentional: stop and report it.'
         )
-        for entry in config.block('network').get('remote_port_deny', []):
-            lines.append(
-                f'- Port {entry["port"]} ({entry["service"]}) is blocked on every host '
-                'except localhost.'
-            )
     else:
         lines += [
             '- Git config/hooks/info and sandbox policy stay read-only through narrow grants. '
@@ -103,6 +98,8 @@ def notice(
         *extra,
         '',
         '### This launch',
+        '- The paths below are engine-added grants; additional native grants and denies come '
+        'from the selected Sandbox Profile chain.',
     ]
     lines += [f'- Read-write: {path}' for path in dict.fromkeys(grants.rw)]
     lines += [

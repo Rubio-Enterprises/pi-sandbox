@@ -1,0 +1,15 @@
+{
+  "meta": {
+    "name": "pi-user"
+  },
+  "filesystem": {
+    "read": ["~/context"],
+    "read_file": ["~/Code/AGENTS.md"]
+  },
+  "environment": {
+    "allow_vars": ["EXAMPLE_REGION"],
+    "set_vars": {
+      "DO_NOT_TRACK": "1"
+    }
+  }
+}

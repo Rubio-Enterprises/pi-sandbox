@@ -1,3 +1,4 @@
+import copy
 import fcntl
 import json
 import os
@@ -13,11 +14,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from pi_sandbox import Refusal
-from pi_sandbox.config import Config, Table, table
+from pi_sandbox.config import Config, Table, parents, string, table
 from pi_sandbox.environment import Environment
 from pi_sandbox.integrations import Grants
 from pi_sandbox.paths import (
     Paths,
+    atomic_json,
     check_trusted,
     content_name,
     json_bytes,
@@ -32,11 +34,24 @@ def base_profile() -> Table:
     return json.loads(files('pi_sandbox').joinpath('data/base-profile.json').read_text())
 
 
+def snapshots(config: Config) -> dict[str, Table]:
+    result = {content_name('pi-sandbox-base', base_profile()): base_profile()}
+    names: dict[str, str] = {}
+    for item in config.profiles:
+        if item.profile is None:
+            continue
+        value = copy.deepcopy(item.profile)
+        if 'extends' in value:
+            value['extends'] = [names.get(name, name) for name in parents(value, item.name)]
+        name = content_name('pi-sandbox-user-' + item.name, value)
+        names[item.name] = name
+        result[name] = value
+    return result
+
+
 def chain(config: Config) -> list[str]:
-    return [
-        content_name('pi-sandbox-base', base_profile()),
-        *(layer.profile_name for layer in config.layers if layer.profile is not None),
-    ]
+    installed = list(snapshots(config))
+    return installed[:1] + installed[-1:] if len(installed) > 1 else installed
 
 
 @contextmanager
@@ -83,14 +98,10 @@ def release(handles: list[int]) -> None:
 
 def sync(config: Config, *, pin: bool = False) -> list[int]:
     root = config.paths.nono / 'profiles'
-    values = [
-        base_profile(),
-        *(layer.profile for layer in config.layers if layer.profile is not None),
-    ]
     handles: list[int] = []
     try:
         with store_lock(config) as directory:
-            for name, value in zip(chain(config), values, strict=True):
+            for name, value in snapshots(config).items():
                 filename = name + '.json'
                 install(root, directory, filename, json_bytes(value))
                 if pin:
@@ -113,12 +124,15 @@ def pinned(config: Config) -> Generator[None]:
 
 
 def prune(config: Config) -> int:
-    keep = {name + '.json' for name in chain(config)}
+    keep = {name + '.json' for name in snapshots(config)}
     cutoff = time.time() - 24 * 60 * 60
     removed = 0
     with store_lock(config) as directory:
         for name in os.listdir(directory):
-            if not name.startswith('pi-sandbox-') or not name.endswith('.json') or name in keep:
+            if (
+                not re.fullmatch(r'pi-sandbox-[A-Za-z0-9-]+-[0-9a-f]{12}\.json', name)
+                or name in keep
+            ):
                 continue
             info = os.stat(name, dir_fd=directory, follow_symlinks=False)
             if (
@@ -160,12 +174,17 @@ def assemble(
         if socket := config.block('docker').get('socket'):
             fs['unix_socket'] = [socket]
     return {
-        'extends': chain(config),
+        'extends': ['engine', *chain(config)[1:]],
         'meta': {'name': 'pi-sandbox-launch'},
         'workdir': {'access': 'readwrite'},
         'filesystem': fs,
         'environment': {'allow_vars': env.allow, 'set_vars': env.set_vars},
-        'unsafe_macos_seatbelt_rules': rules if platform.os == 'macos' else [],
+        'platform_overrides': {
+            platform.os: {
+                'environment': {'set_vars': env.set_vars},
+                'unsafe_macos_seatbelt_rules': rules if platform.os == 'macos' else [],
+            }
+        },
     }
 
 
@@ -214,6 +233,52 @@ def keychain_preflight(path: Path, workdir: Path, paths: Paths) -> None:
         raise Refusal('credentialless policy did not confirm the Keychain deny; refusing launch')
 
 
+def native_writable_grants(path: Path, workdir: Path, projection: Path) -> list[str]:
+    result = subprocess.run(
+        ['nono', 'profile', 'show', str(path), '--json'],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        if result.returncode:
+            raise ValueError('resolver failed')
+        value = table(json.loads(result.stdout), 'resolved nono policy')
+        groups = subprocess.run(
+            ['nono', 'profile', 'groups', '--json', '--all-platforms'],
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if groups.returncode:
+            raise ValueError('cannot inspect implicit groups')
+        catalog = json.loads(groups.stdout)
+        excluded: list[str] = []
+        for group in catalog:
+            entry = table(group, 'nono group')
+            if entry['required']:
+                if entry['allow']:
+                    raise ValueError('required group has grants; cannot isolate native writes')
+            else:
+                excluded.append(string(entry['name'], 'nono group name'))
+        # nono's JSON view is not round-trippable except for its native filesystem block
+        atomic_json(
+            projection,
+            {
+                'meta': {'name': 'pi-sandbox-grant-check'},
+                'filesystem': value['filesystem'],
+                'groups': {'exclude': excluded},
+            },
+        )
+        return writable_grants(projection, workdir)
+    except (KeyError, TypeError, ValueError) as error:
+        raise Refusal('cannot resolve native write grants; refusing launch') from error
+    finally:
+        projection.unlink(missing_ok=True)
+
+
 def writable_grants(path: Path, workdir: Path) -> list[str]:
     result = subprocess.run(
         ['nono', 'profile', 'show', str(path), '--format', 'manifest'],
@@ -246,4 +311,6 @@ def writable_grants(path: Path, workdir: Path) -> list[str]:
                 writable.append(target)
         return writable
     except (KeyError, TypeError, ValueError, Refusal) as error:
-        raise Refusal('cannot resolve hook write grants; refusing launch') from error
+        raise Refusal(
+            'cannot resolve hook write grants; refusing launch: ' + result.stderr.strip()
+        ) from error

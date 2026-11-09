@@ -4,7 +4,7 @@ import shlex
 import pytest
 
 from pi_sandbox import Refusal
-from pi_sandbox.config import Config, Layer, normalize_mcp_name, resolve, validate_section
+from pi_sandbox.config import Config, SandboxProfile, normalize_mcp_name, resolve, validate_section
 from pi_sandbox.wrapper import render
 
 
@@ -35,7 +35,7 @@ from pi_sandbox.wrapper import render
 )
 def test_invalid_mcp_schema(paths, mcp, platform):
     settings = {'pi': {'mcp': mcp}}
-    value = {'schema': 1} | (settings if platform is None else {'platform': {platform: settings}})
+    value = settings if platform is None else {'platform': {platform: settings}}
     with pytest.raises(Refusal, match=r'pi\.mcp'):
         validate_section(value, paths, 'fixture', root=True)
 
@@ -60,15 +60,14 @@ def test_invalid_mcp_schema(paths, mcp, platform):
     ],
 )
 def test_invalid_mcp_tool_patterns(paths, pattern):
-    value = {'schema': 1, 'pi': {'mcp': {'example': {'hide_tools': [pattern]}}}}
+    value = {'pi': {'mcp': {'example': {'hide_tools': [pattern]}}}}
     with pytest.raises(Refusal, match=r'pi\.mcp\.example\.hide_tools'):
         validate_section(value, paths, 'fixture', root=True)
 
 
 @pytest.mark.parametrize('platform', ['macos', 'linux'])
-def test_mcp_layer_and_platform_merge(paths, platform):
+def test_mcp_sidecar_and_platform_merge(paths, platform):
     first = {
-        'schema': 1,
         'pi': {'mcp': {'example': {'hide_tools': ['delete-*'], 'names': ['shared']}}},
         'platform': {
             'macos': {'pi': {'mcp': {'example': {'hide_tools': ['mac.*'], 'names': ['mac']}}}},
@@ -76,7 +75,6 @@ def test_mcp_layer_and_platform_merge(paths, platform):
         },
     }
     second = {
-        'schema': 1,
         'pi': {
             'mcp': {
                 'example': {'hide_tools': ['delete-*', 'update.*'], 'names': ['shared', 'local']}
@@ -85,11 +83,11 @@ def test_mcp_layer_and_platform_merge(paths, platform):
         'platform': {platform: {'pi': {'mcp': {'example': {'names': ['local', 'host']}}}}},
     }
     originals = copy.deepcopy([first, second])
-    layers = [
-        Layer(name, paths.root, validate_section(value, paths, name, root=True))
-        for name, value in [('10-org', first), ('50-user', second)]
+    sidecars = [
+        SandboxProfile(name, paths.root, validate_section(value, paths, name, root=True))
+        for name, value in [('org', first), ('user', second)]
     ]
-    config = resolve(paths, platform, layers)
+    config = resolve(paths, platform, sidecars)
     assert config.mcp == {
         'example': {
             'hide_tools': ['delete-*', 'mac.*' if platform == 'macos' else 'linux/*', 'update.*'],
@@ -156,9 +154,8 @@ def test_mcp_exclusions_deduplicate_flat_aliases_tools_and_cli(paths):
     assert config.values == original
 
 
-def test_mcp_lists_deduplicate_within_first_layer(paths):
+def test_mcp_lists_deduplicate_within_first_sidecar(paths):
     value = {
-        'schema': 1,
         'pi': {
             'mcp': {
                 'example': {
@@ -170,7 +167,7 @@ def test_mcp_lists_deduplicate_within_first_layer(paths):
     }
     original = copy.deepcopy(value)
     validated = validate_section(value, paths, 'fixture', root=True)
-    config = resolve(paths, 'macos', [Layer('10-org', paths.root, validated)])
+    config = resolve(paths, 'macos', [SandboxProfile('org', paths.root, validated)])
     assert config.mcp['example'] == {
         'hide_tools': ['delete-*', 'write.file'],
         'names': ['local', 'other'],
@@ -180,7 +177,6 @@ def test_mcp_lists_deduplicate_within_first_layer(paths):
 
 def test_mcp_empty_and_alias_only_tables(paths):
     value = {
-        'schema': 1,
         'pi': {'mcp': {'_': {}, '9': {'names': ['-']}, 'example': {'hide_tools': []}}},
     }
     validated = validate_section(value, paths, 'fixture', root=True)

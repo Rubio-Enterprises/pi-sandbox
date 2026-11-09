@@ -76,7 +76,7 @@ def plan(config: Config, platform: Platform, args: Arguments) -> Plan:
     if args.scratch:
         root = config.block('workspace').get('scratch_root')
         if not root:
-            raise Refusal('--scratch requires workspace.scratch_root in a layer')
+            raise Refusal('--scratch requires workspace.scratch_root in a Sandbox Profile sidecar')
         create.append(Path(root) / args.scratch)
     runtime = list(config.entries('grants', 'runtime_dirs'))
     origin = query(directory, 'remote', 'get-url', 'origin').removesuffix('.git')
@@ -85,7 +85,6 @@ def plan(config: Config, platform: Platform, args: Arguments) -> Plan:
         for p in config.block('grants').get('project_state_dirs', {}).get(origin, [])
     ]
     create += [Path(p) for p in runtime]
-    rw += [p for p in config.entries('grants', 'rw_dirs') if Path(p).exists()]
     if platform.os == 'linux':
         linux.validate_grants([Path(p) for p in rw], config, git, platform)
         linux.validate_grants(create, config, git, platform, must_exist=False)
@@ -99,7 +98,6 @@ def plan(config: Config, platform: Platform, args: Arguments) -> Plan:
     ro += [
         p
         for p in [
-            *config.entries('grants', 'ro_dirs'),
             *config.entries('grants', 'protected_checkouts'),
             str(paths.data / 'agent-browser/skills'),
             str(paths.config / 'worktrunk'),
@@ -114,11 +112,6 @@ def grants(config: Config, platform: Platform, plan: Plan, *, github: bool, crea
     result = integrations.grants(config, platform, github=github)
     result.rw = [*plan.rw, *result.rw]
     result.ro = [*plan.ro, *result.ro]
-    result.read_file += config.entries('grants', 'ro_files')
-    for file in config.entries('grants', 'ro_files_bypass'):
-        if Path(file).is_file():
-            result.read_file.append(file)
-            result.bypass.append(file)
     if platform.os == 'linux':
         rw, ro = linux.git_grants(plan.git, create=create)
         result.rw += rw
@@ -302,7 +295,7 @@ def launch(args: Arguments, platform: Platform) -> int:
     tool('git')
     paths = Paths.from_env(os.environ)
     workdir(args.workdir, paths.home)
-    config = resolve(paths, platform.os)
+    config = resolve(paths, platform.os, selected=args.profile)
     pack.version()
     pack.require(paths)
     planned = plan(config, platform, args)
@@ -320,6 +313,15 @@ def launch(args: Arguments, platform: Platform) -> int:
         try:
             launch_dir = temporary_dir(paths.launch_state, 'launch.')
             pins = profile.sync(config, pin=True)
+            atomic_json(launch_dir / 'engine.json', prefix(config, planned))
+            if platform.os == 'linux' and config.selected:
+                selected = paths.nono / 'profiles' / (profile.chain(config)[-1] + '.json')
+                native_rw = profile.native_writable_grants(
+                    selected, planned.workdir, launch_dir / 'native-grants.json'
+                )
+                linux.validate_grants(
+                    [Path(p) for p in native_rw], config, planned.git, platform, must_exist=False
+                )
             artifacts = temporary_dir(paths.state / 'agent-sandbox/artifacts', 'run.')
             private_dir(artifacts / 'screenshots')
             private_dir(paths.private_cache)
@@ -338,21 +340,17 @@ def launch(args: Arguments, platform: Platform) -> int:
             candidate = grants(config, platform, planned, github=True, create=True)
             candidate.rw += private_rw
             candidate.ro.append(str(launch_dir))
-            writable = list(candidate.rw)
-            if any(
-                platform.os in hook.get('platforms', ['macos', 'linux']) for hook in config.hooks
-            ):
-                check_path = launch_dir / 'hook-profile.json'
-                atomic_json(
-                    check_path,
-                    profile.assemble(
-                        config, platform, candidate, environment.Environment({}, [], {}), []
-                    ),
-                )
-                try:
-                    writable += profile.writable_grants(check_path, planned.workdir)
-                finally:
-                    check_path.unlink(missing_ok=True)
+            check_path = launch_dir / 'hook-profile.json'
+            atomic_json(
+                check_path,
+                profile.assemble(
+                    config, platform, candidate, environment.Environment({}, [], {}), []
+                ),
+            )
+            try:
+                writable = [*candidate.rw, *profile.writable_grants(check_path, planned.workdir)]
+            finally:
+                check_path.unlink(missing_ok=True)
             if platform.os == 'macos' and planned.git is not None:
                 writable.append(str(planned.git.common))
             extra_rules, extra_notices = hooks.run(
@@ -380,8 +378,6 @@ def launch(args: Arguments, platform: Platform) -> int:
             rules = []
             if platform.os == 'macos':
                 rules = [
-                    *planned.rules,
-                    *seatbelt.port_rules(config),
                     *extra_rules,
                     *seatbelt.host_rules(config, launch_dir),
                     *seatbelt.static_rules(paths, config.entries('grants', 'protected_checkouts')),
@@ -406,6 +402,8 @@ def launch(args: Arguments, platform: Platform) -> int:
                 profile.keychain_preflight(profile_path, planned.workdir, paths)
             argv = ['nono', 'wrap'] if platform.os == 'macos' else ['nono', 'run', '--silent']
             argv += ['--profile', str(profile_path), '--allow-cwd']
+            for name in (['GH_TOKEN'] if creds.github else []) + list(creds.env):
+                argv += ['--env-credential-map', 'env://' + name, name]
             if platform.os == 'linux':
                 argv += [
                     '--suppress-save-prompt',
@@ -444,6 +442,14 @@ def render_wrapper(
     )
 
 
+def prefix(config: Config, planned: Plan) -> dict[str, Any]:
+    return {
+        'meta': {'name': 'pi-sandbox-engine'},
+        'extends': profile.chain(config)[:1],
+        'unsafe_macos_seatbelt_rules': planned.rules,
+    }
+
+
 def preview(config: Config, platform: Platform, args: Arguments) -> dict[str, Any]:
     planned = plan(config, platform, args)
     current = grants(config, platform, planned, github=False, create=False)
@@ -472,8 +478,6 @@ def preview(config: Config, platform: Platform, args: Arguments) -> dict[str, An
         planned.workdir,
     )
     rules = [
-        *planned.rules,
-        *seatbelt.port_rules(config),
         *seatbelt.host_rules(config, launch),
         *seatbelt.static_rules(paths, config.entries('grants', 'protected_checkouts')),
     ]

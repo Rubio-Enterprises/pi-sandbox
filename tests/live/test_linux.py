@@ -20,10 +20,10 @@ def test_linux_git_workflow_subdirectory_and_print_streams(live, org):
     fixture = live
     paths = fixture.paths
     if not org:
-        shutil.rmtree(paths.root / 'layers/10-org')
-        host = paths.root / 'layers/90-host/layer.toml'
+        (paths.root / 'profiles/org.toml').unlink()
+        host = paths.root / 'profiles/host.toml'
         content = host.read_text()
-        host.write_text('schema = 1\n' + content[content.index('[credentials.env.inference]') :])
+        host.write_text('' + content[content.index('[credentials.env.inference]') :])
     fixture.git('branch', 'delete-packed')
     fixture.git('pack-refs', '--all')
     probe = paths.home / 'probe'

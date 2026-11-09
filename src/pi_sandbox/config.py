@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from pi_sandbox import Refusal
-from pi_sandbox.paths import Paths, content_name, trusted_directory, trusted_text
+from pi_sandbox.paths import Paths, trusted_directory, trusted_text
 from pi_sandbox.platform import OS
 
 Table = dict[str, Any]
@@ -17,15 +17,11 @@ INTEGRATIONS = {'credential-stores', 'onepassword', 'cloud-credentials', 'keycha
 IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 PATTERN = re.compile(r'^[A-Za-z0-9_*]+$')
 MCP_NAME = re.compile(r'^[A-Za-z0-9_-]+$')
-LAYER_NAME = re.compile(r'^[0-9]{2}-[a-z0-9][a-z0-9-]*$')
+PROFILE_NAME = re.compile(r'^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$')
 
 SECTIONS: dict[str, dict[str, str]] = {
     'grants': dict.fromkeys(
         (
-            'ro_dirs',
-            'rw_dirs',
-            'ro_files',
-            'ro_files_bypass',
             'runtime_dirs',
             'protected_checkouts',
         ),
@@ -34,9 +30,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     | {'project_state_dirs': 'states'},
     'workspace': {'scratch_root': 'path', 'worktree_root': 'path'},
     'docker': {'socket': 'path'},
-    'network': {'remote_port_deny': 'ports'},
     'credentials': {'dir': 'path', 'env': 'slots'},
-    'env': {'pass': 'names', 'set': 'vars', 'unset': 'names', 'never_pass': 'strings'},
     'pi': {'exclude_tools': 'patterns', 'skill_packs': 'paths', 'mcp': 'mcp'},
     'notice': {'lines': 'strings'},
 }
@@ -56,7 +50,26 @@ def table(value: Any, location: str) -> Table:
 
 def keys(value: Table, allowed: set[str], location: str) -> None:
     if unknown := value.keys() - allowed:
-        raise Refusal(f'{location}: unknown key(s): {", ".join(sorted(unknown))}')
+        replacements = {
+            'ro_dirs': 'filesystem.read',
+            'rw_dirs': 'filesystem.allow',
+            'ro_files': 'filesystem.read_file',
+            'ro_files_bypass': 'filesystem.read_file + filesystem.bypass_protection',
+            'env': 'environment.{allow_vars,set_vars,deny_vars}',
+            'network': 'platform_overrides.macos.unsafe_macos_seatbelt_rules',
+            'remote_port_deny': 'platform_overrides.macos.unsafe_macos_seatbelt_rules',
+            'pass': 'environment.allow_vars',
+            'set': 'environment.set_vars',
+            'unset': 'environment.deny_vars',
+            'never_pass': 'environment.deny_vars',
+        }
+        hints = '; '.join(
+            f'{key}: use nono {replacements[key]}' for key in sorted(unknown) if key in replacements
+        )
+        raise Refusal(
+            f'{location}: unknown key(s): {", ".join(sorted(unknown))}'
+            + (f'; {hints}' if hints else '')
+        )
 
 
 def string(value: Any, location: str) -> str:
@@ -133,16 +146,6 @@ def validate_value(value: Any, kind: str, location: str, paths: Paths) -> Any:
                     raise Refusal(f'{location}: state directories must be relative without ..')
             string(origin, location)
         return result
-    if kind == 'ports':
-        if not isinstance(value, list):
-            raise Refusal(f'{location}: expected a list')
-        for entry in cast(list[Any], value):
-            port = table(entry, location)
-            keys(port, {'port', 'service'}, location)
-            if type(port.get('port')) is not int or not 1 <= port['port'] <= 65535:
-                raise Refusal(f'{location}: port must be between 1 and 65535')
-            string(port.get('service'), location)
-        return cast(list[Any], value)
     if kind == 'slots':
         slots = table(value, location)
         for name, item in slots.items():
@@ -170,26 +173,16 @@ def validate_value(value: Any, kind: str, location: str, paths: Paths) -> Any:
 def validate_section(value: Table, paths: Paths, location: str, *, root: bool) -> Table:
     allowed = set(SECTIONS) | {'integrations', 'hooks'}
     if root:
-        allowed |= {'schema', 'layer', 'platform'}
+        allowed |= {'platform'}
     keys(value, allowed, location)
     result = copy.deepcopy(value)
-    if root:
-        if type(value.get('schema')) is not int or value['schema'] != 1:
-            raise Refusal(f'{location}: schema must be 1')
-        if 'layer' in value:
-            metadata = table(value['layer'], location + '.layer')
-            keys(metadata, {'description'}, location + '.layer')
-            if 'description' in metadata:
-                string(metadata['description'], location)
-        if 'platform' in value:
-            overrides = table(value['platform'], location + '.platform')
-            keys(overrides, {'macos', 'linux'}, location)
-            result['platform'] = {
-                os: validate_section(
-                    table(v, location), paths, f'{location}.platform.{os}', root=False
-                )
-                for os, v in overrides.items()
-            }
+    if root and 'platform' in value:
+        overrides = table(value['platform'], location + '.platform')
+        keys(overrides, {'macos', 'linux'}, location)
+        result['platform'] = {
+            os: validate_section(table(v, location), paths, f'{location}.platform.{os}', root=False)
+            for os, v in overrides.items()
+        }
     for section, fields in SECTIONS.items():
         if section not in value:
             continue
@@ -244,43 +237,22 @@ def merge(left: Table, right: Table) -> Table:
     return result
 
 
-def validate_profile(value: Any, name: str, location: str) -> Table:
-    fragment = table(value, location)
-
-    def check(node: Table) -> None:
-        forbidden = {'extends', 'unsafe_macos_seatbelt_rules', 'workdir'} & node.keys()
-        if forbidden:
-            raise Refusal(f'{location}: forbidden profile key(s): {", ".join(sorted(forbidden))}')
-        for key, item in node.items():
-            if isinstance(item, dict):
-                check(cast(Table, item))
-            if key == 'meta':
-                meta = table(item, location)
-                if meta.get('name', name) != name:
-                    raise Refusal(f'{location}: meta.name must be {name}')
-
-    check(fragment)
-    fragment.setdefault('meta', {})['name'] = name
-    return fragment
-
-
 @dataclass(frozen=True)
-class Layer:
+class SandboxProfile:
     name: str
     path: Path
     settings: Table
     profile: Table | None = None
 
-    @property
-    def profile_name(self) -> str:
-        return content_name('pi-sandbox-layer-' + self.name, self.profile)
+    sidecar: Path | None = None
 
 
 @dataclass
 class Config:
     paths: Paths
-    layers: list[Layer] = field(default_factory=list[Layer])
+    profiles: list[SandboxProfile] = field(default_factory=list[SandboxProfile])
     values: Table = field(default_factory=Table)
+    selected: str | None = None
 
     def block(self, name: str) -> Table:
         return cast(Table, self.values.get(name, {}))
@@ -321,70 +293,105 @@ class Config:
         return cast(list[Table], self.values.get('hooks', []))
 
 
-def layer_directories(paths: Paths) -> list[Path]:
-    root = paths.root / 'layers'
-    try:
-        with trusted_directory(root) as fd:
-            return [root / name for name in sorted(os.listdir(fd))]
-    except FileNotFoundError:
+def parents(value: Table, location: str) -> list[str]:
+    bases = value.get('extends')
+    if bases is None:
         return []
+    return [bases] if isinstance(bases, str) else strings(bases, location + '.extends')
 
 
-def discover(paths: Paths) -> list[Layer]:
-    result: list[Layer] = []
-    root = paths.root / 'layers'
+def policy_text(root: Path, filename: str) -> str | None:
     try:
         with trusted_directory(root) as fd:
-            for name in sorted(os.listdir(fd)):
-                if layer := _load_layer(root / name, paths, fd):
-                    result.append(layer)
-    except FileNotFoundError as error:
-        if error.filename == str(root):
-            return []
-        raise Refusal(f'{root}: cannot load policy: {error}') from error
+            return trusted_text(filename, parent=fd, optional=True)
+    except FileNotFoundError:
+        return None
+
+
+def discover(paths: Paths, selected: str | None = None) -> list[SandboxProfile]:
+    if selected is None:
+        selected = os.environ.get('PI_SANDBOX_PROFILE') or None
+    if selected is None:
+        return []
+    if not PROFILE_NAME.fullmatch(selected):
+        raise Refusal(f'invalid Sandbox Profile name: {selected!r}')
+    result: list[SandboxProfile] = []
+    active: list[str] = []
+    loaded: dict[str, SandboxProfile] = {}
+
+    def load(name: str) -> SandboxProfile:
+        if name in loaded:
+            return loaded[name]
+        if not PROFILE_NAME.fullmatch(name):
+            # Leave registry-reference lookup (including @version) to nono
+            parts = name.partition('@')[0].split('/')
+            if (
+                len(parts) != 2
+                or not all(parts)
+                or name.startswith(('.', '~', '/'))
+                or name.endswith('.json')
+            ):
+                raise Refusal(f'invalid nono profile reference: {name!r}')
+            item = SandboxProfile(name, paths.nono / 'packages', {})
+            loaded[name] = item
+            return item
+        source = paths.nono / 'profiles' / (name + '.json')
+        raw = policy_text(source.parent, source.name)
+        if raw is None:
+            if not active:
+                raise Refusal(f'Sandbox Profile does not exist: {source}')
+            item = SandboxProfile(name, source, {})
+            loaded[name] = item
+            return item
+        try:
+            value = table(json.loads(raw), str(source))
+            sidecar = paths.root / 'profiles' / (name + '.toml')
+            text = policy_text(sidecar.parent, sidecar.name)
+            settings = (
+                validate_section(tomllib.loads(text), paths, str(sidecar), root=True)
+                if text is not None
+                else {}
+            )
+            item = SandboxProfile(
+                name, source, settings, value, sidecar if text is not None else None
+            )
+            loaded[name] = item
+            return item
+        except (OSError, ValueError) as error:
+            raise Refusal(f'{source}: cannot load Sandbox Profile: {error}') from error
+
+    def visit(name: str) -> None:
+        if name in active:
+            raise Refusal('Sandbox Profile cycle: ' + ' -> '.join([*active, name]))
+        if len(active) >= 10:
+            raise Refusal('Sandbox Profile inheritance exceeds nono depth 10')
+        item = load(name)
+        active.append(name)
+        try:
+            if item.profile is not None:
+                for base in parents(item.profile, str(item.path)):
+                    visit(base)
+            result.append(item)
+        finally:
+            active.pop()
+
+    visit(selected)
     return result
 
 
-def load_layer(directory: Path, paths: Paths) -> Layer | None:
-    with trusted_directory(paths.root / 'layers') as fd:
-        return _load_layer(directory, paths, fd)
-
-
-def _load_layer(directory: Path, paths: Paths, parent: int) -> Layer | None:
-    if not LAYER_NAME.fullmatch(directory.name):
-        raise Refusal(f'{directory}: invalid layer directory name')
-    try:
-        with trusted_directory(directory.name, parent=parent) as fd:
-            if not os.listdir(fd):
-                return None
-            source = trusted_text('layer.toml', parent=fd)
-            value = tomllib.loads(source or '')
-            settings = validate_section(value, paths, str(directory / 'layer.toml'), root=True)
-            fragment = trusted_text('profile.json', parent=fd, optional=True)
-            profile = (
-                validate_profile(
-                    json.loads(fragment),
-                    'pi-sandbox-layer-' + directory.name,
-                    str(directory / 'profile.json'),
-                )
-                if fragment is not None
-                else None
-            )
-    except (OSError, ValueError) as error:
-        raise Refusal(f'{directory}: cannot load layer: {error}') from error
-    return Layer(directory.name, directory, settings, profile)
-
-
-def resolve(paths: Paths, os: OS, layers: list[Layer] | None = None) -> Config:
-    layers = discover(paths) if layers is None else layers
+def resolve(
+    paths: Paths,
+    os: OS,
+    profiles: list[SandboxProfile] | None = None,
+    *,
+    selected: str | None = None,
+) -> Config:
+    profiles = discover(paths, selected) if profiles is None else profiles
     values: Table = {}
-    for layer in layers:
-        values = merge(
-            values,
-            {k: v for k, v in layer.settings.items() if k not in ('schema', 'layer', 'platform')},
-        )
-        values = merge(values, layer.settings.get('platform', {}).get(os, {}))
-    config = Config(paths, layers, values)
+    for item in profiles:
+        values = merge(values, {k: v for k, v in item.settings.items() if k != 'platform'})
+        values = merge(values, item.settings.get('platform', {}).get(os, {}))
+    config = Config(paths, profiles, values, profiles[-1].name if profiles else None)
     for name, slot in config.slots.items():
         if ('file' in slot) == ('command' in slot) or 'env' not in slot:
             raise Refusal(

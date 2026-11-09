@@ -44,9 +44,9 @@ def test_hook_executable_in_rw_project_refused(fixture, os_name, aliased):
         alias = fixture.bins / 'hook-alias'
         alias.symlink_to(target)
         target = alias
-    fixture.layer(
+    fixture.sandbox_profile(
         '95-hook',
-        'schema = 1\n[[hooks]]\nname = "inventory"\ncommand = ' + json.dumps([str(target)]) + '\n',
+        '[[hooks]]\nname = "inventory"\ncommand = ' + json.dumps([str(target)]) + '\n',
     )
     result = fixture.run(os_name)
     assert result.returncode == 2 and 'read-write grant' in result.stderr
@@ -58,9 +58,9 @@ def test_hook_executable_in_rw_project_refused(fixture, os_name, aliased):
 @pytest.mark.parametrize('os_name', ['macos', 'linux'])
 def test_refused_hook_precedes_all_credentials(fixture, os_name):
     marker = fixture.out / 'credential-command-ran'
-    fixture.layer(
+    fixture.sandbox_profile(
         '95-hook',
-        'schema = 1\n[credentials.env.inference]\ncommand = '
+        '[credentials.env.inference]\ncommand = '
         + json.dumps('touch ' + str(marker) + '; printf secret')
         + '\n[[hooks]]\nname = "refusal"\ncommand = ["sh", "-c", "echo reason >&2; exit 1"]\n',
     )
@@ -77,7 +77,7 @@ def test_docker_socket_bypass_on_both_os_paths(fixture, os_name):
         path = Path(name).resolve() / 'docker.sock'
         with socket.socket(socket.AF_UNIX) as server:
             server.bind(str(path))
-            fixture.layer('95-docker', 'schema = 1\n[docker]\nsocket = ' + json.dumps(str(path)))
+            fixture.sandbox_profile('95-docker', '[docker]\nsocket = ' + json.dumps(str(path)))
             result = fixture.run(os_name)
             assert result.returncode == 0, result.stderr
             fs = fixture.capture()['profile']['filesystem']
@@ -125,9 +125,9 @@ Path({str(ready)!r}).write_text(json.dumps([os.getpid(), child.pid]))
 time.sleep(120)
 """,
     )
-    fixture.layer(
+    fixture.sandbox_profile(
         '95-tree',
-        'schema = 1\n[[hooks]]\nname = "tree"\ncommand = ' + json.dumps([str(hook)]) + '\n',
+        '[[hooks]]\nname = "tree"\ncommand = ' + json.dumps([str(hook)]) + '\n',
     )
     process = subprocess.Popen(
         fixture.command(),
@@ -170,9 +170,9 @@ def test_hook_output_is_bounded(fixture):
     hook = executable(
         fixture.bins / 'large-hook', f'#!{sys.executable}\nprint("x" * (2 * 1024 * 1024))\n'
     )
-    fixture.layer(
+    fixture.sandbox_profile(
         '95-large',
-        'schema = 1\n[[hooks]]\nname = "large"\ncommand = ' + json.dumps([str(hook)]) + '\n',
+        '[[hooks]]\nname = "large"\ncommand = ' + json.dumps([str(hook)]) + '\n',
     )
     before = time.monotonic()
     result = fixture.run()
@@ -181,28 +181,28 @@ def test_hook_output_is_bounded(fixture):
     assert len(result.stderr) < 1024
 
 
-def test_empty_org_transition_preserves_credentials_and_host_state(fixture):
-    (fixture.paths.root / 'layers/10-org/layer.toml').unlink()
-    host = fixture.paths.root / 'layers/90-host/layer.toml'
+def test_sidecar_removal_preserves_credentials_and_host_state(fixture):
+    (fixture.paths.root / 'profiles/org.toml').unlink()
+    host = fixture.paths.root / 'profiles/host.toml'
     source = host.read_text()
-    host.write_text('schema = 1\n' + source[source.index('[credentials.env.inference]') :])
+    host.write_text('' + source[source.index('[credentials.env.inference]') :])
     token = fixture.paths.root / 'credentials/pi-sandbox-github.token'
     original = token.read_bytes()
     canary = file(fixture.paths.root / 'host/canary', 'host-state')
     result = fixture.run()
     assert result.returncode == 0, result.stderr
     assert token.read_bytes() == original and canary.read_text() == 'host-state'
-    assert (fixture.paths.root / 'layers/10-org').is_dir()
+    assert (fixture.paths.nono / 'profiles/org.json').is_file()
 
 
-@pytest.mark.parametrize('source', ['native-layer', 'pi-pack'])
+@pytest.mark.parametrize('source', ['native-profile', 'pi-pack'])
 def test_hook_rejects_native_profile_and_pack_rw_grants(fixture, source):
     directory = fixture.paths.home / ('.pi/runtime' if source == 'pi-pack' else 'profile-rw')
     hook = executable(directory / 'hook', '#!/bin/sh\nexit 0\n')
-    fragment = {'filesystem': {'allow': [str(directory)]}} if source == 'native-layer' else None
-    fixture.layer(
+    fragment = {'filesystem': {'allow': [str(directory)]}} if source == 'native-profile' else None
+    fixture.sandbox_profile(
         '95-hook',
-        'schema = 1\n[[hooks]]\nname = "inventory"\ncommand = ' + json.dumps([str(hook)]) + '\n',
+        '[[hooks]]\nname = "inventory"\ncommand = ' + json.dumps([str(hook)]) + '\n',
         fragment,
     )
     result = fixture.run()
@@ -212,7 +212,7 @@ def test_hook_rejects_native_profile_and_pack_rw_grants(fixture, source):
 def test_only_setup_and_prune_delete_old_unreferenced_profiles(fixture):
     root = fixture.paths.nono / 'profiles'
     root.mkdir(parents=True, exist_ok=True)
-    old = file(root / 'pi-sandbox-layer-00-obsolete.json', '{}')
+    old = file(root / 'pi-sandbox-user-obsolete-000000000000.json', '{}')
     age = time.time() - 48 * 60 * 60
     os.utime(old, (age, age))
     result = fixture.run()

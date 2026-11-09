@@ -12,6 +12,7 @@ from pi_sandbox.platform import Platform
 class Arguments:
     workdir: str = field(default_factory=os.getcwd)
     scratch: str = ''
+    profile: str | None = None
     rw: list[str] = field(default_factory=list[str])
     ro: list[str] = field(default_factory=list[str])
     patterns: list[str] = field(default_factory=list[str])
@@ -27,7 +28,17 @@ def split(args: list[str]) -> Arguments:
         if arg == '--':
             result.rest += [arg, *args[index:]]
             break
-        if arg.startswith('--workdir='):
+        if arg == '--profile' or arg.startswith('--profile='):
+            if '=' in arg:
+                result.profile = arg.split('=', 1)[1]
+            else:
+                if index == len(args) or args[index].startswith('-'):
+                    raise Refusal('--profile needs a Sandbox Profile name')
+                result.profile = args[index]
+                index += 1
+            if not result.profile:
+                raise Refusal('--profile needs a Sandbox Profile name')
+        elif arg.startswith('--workdir='):
             result.workdir = arg.split('=', 1)[1]
         elif arg.startswith('--scratch='):
             result.scratch = arg.split('=', 1)[1]

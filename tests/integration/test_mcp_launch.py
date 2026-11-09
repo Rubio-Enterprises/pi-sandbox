@@ -8,10 +8,9 @@ from tests.support import file
 
 @pytest.mark.parametrize('os_name', ['macos', 'linux'])
 def test_mcp_wrapper_and_controller_preview(fixture, os_name):
-    fixture.layer(
+    fixture.sandbox_profile(
         '95-mcp',
-        f"""schema = 1
-[pi.mcp.example]
+        f"""[pi.mcp.example]
 hide_tools = ["delete-*", "write.file", "api/remove", "*"]
 names = ["local-api", "local_api"]
 [platform.{os_name}.pi.mcp.example]
@@ -42,9 +41,9 @@ hide_tools = ["platform-*"]
     result = fixture.ctl('config', '--json', os_name=os_name)
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
-    assert value['pi']['mcp'] == declared
-    assert value['pi']['exclude_tools'] == ['mcp__example__delete_*', 'unsafe_*']
-    assert value['pi']['rendered_exclude_tools'] == rendered
+    assert value['sidecar']['pi']['mcp'] == declared
+    assert value['sidecar']['pi']['exclude_tools'] == ['mcp__example__delete_*', 'unsafe_*']
+    assert value['rendered_exclude_tools'] == rendered
     arguments = ['--exclude-tools=mcp__local_api__write_file,cli_*', '-xt', 'cli_*,other']
     result = fixture.run(os_name, *arguments)
     assert result.returncode == 0, result.stderr
@@ -57,7 +56,7 @@ hide_tools = ["platform-*"]
     result = fixture.ctl('profile', '--workdir=' + str(directory), *arguments, os_name=os_name)
     assert result.returncode == 0, result.stderr
     assert 'wrapper' not in json.loads(result.stdout)
-    assert result.stderr.startswith('Pi wrapper (preview):\n')
+    assert 'Pi wrapper (preview):\n' in result.stderr
     script = result.stderr
     argv = shlex.split(script.splitlines()[-1])
     assert argv.count('--exclude-tools') == 1
@@ -78,10 +77,9 @@ hide_tools = ["platform-*"]
     ],
 )
 def test_doctor_server_name_matches(fixture, logical, aliases, configured, warning):
-    fixture.layer(
+    fixture.sandbox_profile(
         '95-mcp',
-        f'schema = 1\n[pi.mcp.{logical}]\nhide_tools = ["delete-*"]\n'
-        f'names = {json.dumps(aliases)}\n',
+        f'[pi.mcp.{logical}]\nhide_tools = ["delete-*"]\nnames = {json.dumps(aliases)}\n',
     )
     source = file(
         fixture.paths.home / '.pi/agent/mcp.json',
@@ -92,7 +90,7 @@ def test_doctor_server_name_matches(fixture, logical, aliases, configured, warni
     assert result.returncode == 0, result.stderr
     expected = (
         f'pi.mcp.{logical}: no configured MCP server named {", ".join([logical, *aliases])}; '
-        'its hidden tools match nothing (add names = [...] in your layer)'
+        'its hidden tools match nothing (add names = [...] in your sidecar)'
     )
     assert (expected in result.stdout) is warning
     assert 'servers registered by extensions are not visible to this check' in result.stdout
@@ -101,7 +99,7 @@ def test_doctor_server_name_matches(fixture, logical, aliases, configured, warni
 
 @pytest.mark.parametrize('form', ['separate', 'equals'])
 def test_doctor_project_overrides_and_agent_dir(fixture, form):
-    fixture.layer('95-mcp', 'schema = 1\n[pi.mcp.example]\nhide_tools = ["delete_*"]\n')
+    fixture.sandbox_profile('95-mcp', '[pi.mcp.example]\nhide_tools = ["delete_*"]\n')
     default = file(fixture.paths.home / '.pi/agent/mcp.json', 'invalid and ignored')
     agent_dir = fixture.paths.home / 'custom-agent'
     fixture.env['PI_CODING_AGENT_DIR'] = str(agent_dir)
@@ -138,7 +136,7 @@ def test_doctor_project_overrides_and_agent_dir(fixture, form):
     ],
 )
 def test_doctor_missing_or_invalid_mcp_is_advisory(fixture, content):
-    fixture.layer('95-mcp', 'schema = 1\n[pi.mcp.example]\nhide_tools = ["delete_*"]\n')
+    fixture.sandbox_profile('95-mcp', '[pi.mcp.example]\nhide_tools = ["delete_*"]\n')
     source = fixture.paths.home / '.pi/agent/mcp.json'
     if isinstance(content, bytes):
         source.parent.mkdir(parents=True)

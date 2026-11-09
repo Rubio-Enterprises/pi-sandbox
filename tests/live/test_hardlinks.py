@@ -10,22 +10,21 @@ from tests.support import executable
 pytestmark = pytest.mark.live
 
 
-@pytest.mark.parametrize('kind', ['layer.toml', 'profile.json', 'hook'])
+@pytest.mark.parametrize('kind', ['toml', 'json', 'hook'])
 def test_rw_hardlink_write_probe_and_engine_refusal(live, kind):
     fixture = live
     platform = Platform.detect()
     workdir = fixture.linked if platform.os == 'linux' else fixture.repo
     if kind == 'hook':
         source = executable(fixture.paths.home / '.local/libexec/hook', '#!/bin/sh\nprintf "{}"\n')
-        fixture.layer(
+        fixture.sandbox_profile(
             '95-hardlink',
-            'schema = 1\n[[hooks]]\nname = "inventory"\ncommand = '
-            + json.dumps([str(source)])
-            + '\n',
+            '[[hooks]]\nname = "inventory"\ncommand = ' + json.dumps([str(source)]) + '\n',
         )
     else:
-        directory = fixture.layer('95-hardlink', 'schema = 1\n', {})
-        source = directory / kind
+        fixture.sandbox_profile('hardlink', '', {})
+        root = fixture.paths.root if kind == 'toml' else fixture.paths.nono
+        source = root / 'profiles' / ('hardlink.' + kind)
     before = source.read_bytes()
     alias = workdir / 'policy-alias'
     alias.hardlink_to(source)
