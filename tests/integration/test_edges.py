@@ -118,7 +118,7 @@ def test_production_entry_ignores_test_override_environment(fixture, module):
         if module == 'cli':
             assert fixture.capture()['argv'][0] == ('wrap' if platform.os == 'macos' else 'run')
         else:
-            assert bool(json.loads(result.stdout)['unsafe_macos_seatbelt_rules']) == (
+            assert bool(json.loads(result.stdout).get('unsafe_macos_seatbelt_rules')) == (
                 platform.os == 'macos'
             )
 
