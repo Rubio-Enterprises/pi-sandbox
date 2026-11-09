@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.0](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.3...v0.2.0) (2026-11-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* replace numbered TOML layers and fragments with native nono JSON Sandbox Profiles and optional Pi sidecars. Select with --profile or PI_SANDBOX_PROFILE; migrate static grants, environment rules and macOS port rules into native JSON. The controller layers command is replaced by chain.
+
+### Features
+
+* compose sandbox policy from native nono profiles ([c1d6c10](https://github.com/Rubio-Enterprises/pi-sandbox/commit/c1d6c102258d8f658ae1ba23268c9d0a8be7a115))
+
+
+### Bug Fixes
+
+* **ctl:** show complete sandbox composition previews ([2bd8adb](https://github.com/Rubio-Enterprises/pi-sandbox/commit/2bd8adb65aa455bfd3240acf41ab789e5c81835f))
+* keep service credential paths in sandbox profiles ([593b601](https://github.com/Rubio-Enterprises/pi-sandbox/commit/593b601bec7f8a18a90d862d28f276d4186c2bef))
+
+
+### Documentation
+
+* document sandbox profiles and pi sidecar migration ([2178042](https://github.com/Rubio-Enterprises/pi-sandbox/commit/217804245a8efc97a056ef3e8b87abd187d9ff87))
+* explain why herdr cannot show blocked inside the sandbox ([#31](https://github.com/Rubio-Enterprises/pi-sandbox/issues/31)) ([a383e49](https://github.com/Rubio-Enterprises/pi-sandbox/commit/a383e49f791f01d82177b6cd20758833ce966231))
+
 ## [0.1.3](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.2...v0.1.3) (2026-11-08)
 
 
