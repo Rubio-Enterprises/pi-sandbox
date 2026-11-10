@@ -50,7 +50,44 @@ def tool(name: str) -> str:
     found = shutil.which(name)
     if not found:
         raise Refusal(f'{name} is not installed' if name == 'pi' else f'{name} is required')
-    return str(Path(found).absolute())
+    path = Path(found).absolute()
+    return resolve_pi(path) if name == 'pi' else str(path)
+
+
+def mise_shim(path: Path) -> bool:
+    return path.is_symlink() and path.resolve().name == 'mise'
+
+
+def resolve_pi(path: Path) -> str:
+    if not mise_shim(path):
+        return str(path)
+    try:
+        result = subprocess.run(
+            [str(path.resolve()), 'which', 'pi'],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        candidate = Path(result.stdout.strip())
+        if (
+            result.returncode == 0
+            and candidate.is_absolute()
+            and shutil.which(str(candidate))
+            and not mise_shim(candidate)
+            and candidate.resolve() != path.resolve()
+        ):
+            return str(candidate)
+    except OSError, subprocess.TimeoutExpired:
+        pass
+    for directory in os.get_exec_path():
+        found = shutil.which('pi', path=directory)
+        if found and not mise_shim(Path(found)):
+            return str(Path(found).absolute())
+    raise Refusal(
+        'pi resolves to a mise shim with no executable target; '
+        'activate a Pi version in mise or put a non-shim pi on PATH'
+    )
 
 
 def extra_path(value: str, home: Path) -> Path:
