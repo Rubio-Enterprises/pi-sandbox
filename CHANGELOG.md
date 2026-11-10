@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.0...v0.2.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* resolve pi past inactive mise shims ([#34](https://github.com/Rubio-Enterprises/pi-sandbox/issues/34)) ([79e5a53](https://github.com/Rubio-Enterprises/pi-sandbox/commit/79e5a531c80e99e79ce227e0a8dff804a3b61838))
+
 ## [0.2.0](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.1.3...v0.2.0) (2026-11-09)
 
 
