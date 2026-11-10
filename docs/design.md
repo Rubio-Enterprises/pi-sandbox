@@ -429,6 +429,16 @@ TERM_PROGRAM still passes for an extension/detection-manifest pairing; the engin
 
 ## Pi wrapper and notice
 
+Pi lookup happens once on the host before launch state or credentials are created.
+Ordinary PATH executables retain their invoked path, including non-mise symlinks.
+A symlink whose canonical target is named `mise` is treated as a mise shim: query
+that exact target with `which pi` (10-second timeout), accepting only an absolute,
+executable non-shim path other than the mise binary. Otherwise search host PATH
+in order, skipping mise shims; refuse with an activation/PATH hint if none remains.
+This preserves active mise tools even with a shim-only PATH and avoids inactive
+shim fallback into the launch wrapper. It adds no grants and performs no lookup
+inside the sandbox.
+
 `<launch>/bin/pi` is a POSIX `sh` script that `exec`s the absolute real Pi with: one
 `--exclude-tools` (merged, de-duplicated, comma-joined) when any pattern exists; one `--skill`
 per existing skill root of the `nolabs-ai/pi` pack and each `pi.skill_packs` entry (roots from

@@ -34,6 +34,11 @@ Docker VM mounts can bypass host filesystem restrictions.
 Prerequisites: Python 3.14.6+, [uv](https://docs.astral.sh/uv/),
 [Pi](https://github.com/earendil-works/pi), Git, and
 [nono](https://nono.sh) 0.80.0+. Tools are discovered through `PATH`.
+If `pi` is a symlink to `mise`, the launcher first asks that mise executable for
+`mise which pi`. If it cannot supply an executable non-shim target, the launcher
+uses the first non-shim `pi` on the host's `PATH`, or refuses if none exists.
+The sandbox wrapper always execs the one absolute path selected on the host;
+no additional filesystem grants are added.
 From a source checkout:
 
 ```sh
