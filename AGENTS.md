@@ -13,6 +13,12 @@ the XDG cache directory's `pi-sandbox-tests/`, never the system temp directory.
 Use synthetic credentials and sockets; never query a real Keychain or token.
 Preserve the exact Seatbelt rule order and explicit-socket tmux cleanup.
 
+- **Architecture decisions**: an ADR records why a rule exists. Before changing a decision, check
+  `docs/adr/` for an accepted ADR; reversing one needs a superseding ADR. Write one only if a
+  person approved it: in the session, or in an approved plan or `delegate-to-agent` issue that
+  names the ADR. Otherwise the PR description is the record. Follow
+  [the format](docs/adr/0001-record-architecture-decisions.md), which states the ADR test.
+
 ## Commands
 
 First command in a fresh checkout: `just build`.
