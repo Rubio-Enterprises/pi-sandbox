@@ -532,7 +532,8 @@ nono pull's responsibility; corruption is repaired through nono or refused.
   entry point shipped only under `tests/`. Native entry-point checks and live doctor
   tests retain host detection and real kernel/Landlock checks.
   No environment variable relaxes a production preflight. CI excludes the live marker;
-  `just test` excludes it too; run `just exec uv run pytest tests/live` explicitly.
+  `just test` excludes it too; on a host with uv, Python 3.14.6+ and nono 0.80.0+,
+  run `uv run --frozen pytest tests/live` explicitly. The dev image has no nono.
 
 ## Testing
 
