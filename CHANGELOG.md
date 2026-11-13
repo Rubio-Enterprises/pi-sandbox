@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.1...v0.2.2) (2026-11-13)
+
+
+### Documentation
+
+* **adr:** convert records to the minimal format ([#37](https://github.com/Rubio-Enterprises/pi-sandbox/issues/37)) ([6421c8e](https://github.com/Rubio-Enterprises/pi-sandbox/commit/6421c8e782280b8294349eea134426b5d68f293d))
+* name the spec:agent state in the adr rule ([#39](https://github.com/Rubio-Enterprises/pi-sandbox/issues/39)) ([864af32](https://github.com/Rubio-Enterprises/pi-sandbox/commit/864af32cb0712d160e1598888366adfa24ea2d95))
+
 ## [0.2.1](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.0...v0.2.1) (2026-11-10)
 
 
