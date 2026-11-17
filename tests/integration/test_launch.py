@@ -118,6 +118,11 @@ def test_full_launch_contract(fixture, os_name, org, token):
             }
         }
     }
+    default = {'auths': {'ghcr.io': {'auth': cap['docker']['auths']['ghcr.io']['auth']}}}
+    assert cap['docker_build_files'] == {
+        'ghcr.io/config.json': [cap['docker_build'], 0o600],
+        'ghcr.io/example/base/config.json': [default, 0o600],
+    }
     assert argv[argv.index('--skill') + 1].endswith('/nolabs-ai/pi/guides')
     assert argv.count('--skill') == 1
     assert env['AGENT_BROWSER_ARGS'] == '--no-sandbox,--no-startup-window'

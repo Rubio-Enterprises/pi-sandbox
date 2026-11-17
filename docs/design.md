@@ -157,6 +157,7 @@ inside `platform.macos` / `platform.linux`; only `platform` itself cannot nest.
 | `grants.runtime_dirs` | List of absolute directories, created private and granted RW. |
 | `grants.project_state_dirs` | Origin-URL-to-string-list map; paths relative to XDG state, without `..`, empty or `.`. |
 | `docker.socket` | Absolute socket path; enables routing and isolated Docker configuration. |
+| `docker.default_credential_build_repositories` | List of full repository names, `<registry>/<repository>` (lowercase; no tag, digest, wildcard or `config.json` component). Builds of these repositories use the launch's default auth. Lists merge across profiles. |
 | `integrations` | List from credential-stores, onepassword, cloud-credentials, keychain, agent-mcp. |
 | `hooks` | List of tables: nonempty string `name`, nonempty argv string-list `command`, optional `platforms` list from macos/linux (default both). |
 
@@ -244,6 +245,15 @@ Names map one-to-one onto behaviours of the predecessor:
   `docker pull`, `docker run` and `docker compose pull` keep the `pi-sandbox-ghcr.token` entry.
   A host whose builds and pulls need different GitHub accounts on the same registry uses it;
   without it nothing is written and nothing is printed.
+- `docker.default_credential_build_repositories` (sidecar): for each listed repository the launch
+  writes `<launch>/docker/buildx/config/<registry>/<repository>/config.json` (directories 0700,
+  file 0600), which Buildx prefers over the registry-wide file for that repository. It holds the
+  launch's default `auths` entry for the registry (the `pi-sandbox-ghcr.token` entry for `ghcr.io`),
+  never `credsStore`. When there is no default auth (no token, or a registry other than `ghcr.io`)
+  the file holds an empty `auths`, so the build fails visibly rather than falling back to the
+  build token or a host credential helper. Entries removed from the list leave nothing in later
+  launches, because each launch writes a fresh directory. Names are validated before any path is
+  built.
 
 A trailing newline is stripped. Token bytes never appear in argv, logs, Git config or Git URLs.
 Each launch writes `<launch>/gitconfig` (`credential.helper` empty, the GitHub helper,

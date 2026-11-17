@@ -72,6 +72,27 @@ def test_platform_merge_and_slot_extension(paths):
         {'credentials': {'env': {'slot': {'file': '../bad', 'env': 'TOKEN'}}}},
         {'grants': {'project_state_dirs': {'origin': ['../escape']}}},
         {'platform': {'linux': {'schema': 1}}},
+        {'docker': {'default_credential_build_repositories': 'ghcr.io/example/base'}},
+        *[
+            {'docker': {'default_credential_build_repositories': [repository]}}
+            for repository in (
+                '',
+                'example/base:latest',
+                'ghcr.io',
+                'ghcr.io/',
+                'ghcr.io/Example/base',
+                'ghcr.io/example/*',
+                'ghcr.io/example/base@sha256:abc',
+                'ghcr.io/../base',
+                'ghcr.io/example/./base',
+                'ghcr.io//base',
+                '/ghcr.io/base',
+                'ghcr.io/example/base/',
+                'ghcr.io/config.json',
+                'ghcr.io/example/base\n',
+                'host name/base',
+            )
+        ],
     ],
 )
 def test_invalid_schema(paths, value):
@@ -141,3 +162,42 @@ def test_example_profiles_parse(fixture):
     for directory in (REPO / 'examples/profiles').glob('*.toml'):
         value = tomllib.loads(directory.read_text())
         validate_section(value, fixture.paths, str(directory), root=True)
+
+
+@pytest.mark.parametrize(
+    'repository',
+    [
+        'ghcr.io/example/base',
+        'ghcr.io/example/team/app-1_x.y',
+        'registry.example:5000/app',
+        'localhost/app',
+    ],
+)
+def test_default_credential_build_repositories_accept_canonical_names(paths, repository):
+    value = {'docker': {'default_credential_build_repositories': [repository]}}
+    result = validate_section(value, paths, 'fixture', root=True)
+    assert result['docker']['default_credential_build_repositories'] == [repository]
+
+
+def test_default_credential_build_repositories_merge_across_profiles(paths):
+    config = resolve(
+        paths,
+        'macos',
+        [
+            SandboxProfile(
+                'a',
+                paths.root,
+                {'docker': {'default_credential_build_repositories': ['ghcr.io/a/b']}},
+            ),
+            SandboxProfile(
+                'b',
+                paths.root,
+                {
+                    'docker': {
+                        'default_credential_build_repositories': ['ghcr.io/a/b', 'ghcr.io/c/d']
+                    }
+                },
+            ),
+        ],
+    )
+    assert config.default_credential_build_repositories == ['ghcr.io/a/b', 'ghcr.io/c/d']

@@ -1,6 +1,7 @@
 import base64
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -63,3 +64,52 @@ def test_ghcr_build_token_writes_buildx_alternative_config(paths, build):
     }
     assert alternative.stat().st_mode & 0o777 == 0o600
     assert alternative.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_default_credential_repositories_use_the_launch_default_auth(paths):
+    launch = paths.state / 'launch'
+    credentials = Credentials(ghcr='ghcr_fixture', ghcr_build='build_fixture')
+    repositories = ['ghcr.io/example/base', 'ghcr.io/example/nested/image']
+    write_files(launch, credentials, 'linux', repositories)
+    config = launch / 'docker/buildx/config'
+    expected = {
+        'auths': {'ghcr.io': {'auth': base64.b64encode(b'x-access-token:ghcr_fixture').decode()}}
+    }
+    for repository in repositories:
+        file = config / repository / 'config.json'
+        assert json.loads(file.read_text()) == expected
+        assert file.stat().st_mode & 0o777 == 0o600
+        for directory in [file.parent, *file.parent.parents][: len(Path(repository).parts)]:
+            assert directory.stat().st_mode & 0o777 == 0o700
+    registry_wide = json.loads((config / 'ghcr.io/config.json').read_text())
+    assert (
+        registry_wide['auths']['ghcr.io']['auth']
+        == base64.b64encode(b'x-access-token:build_fixture').decode()
+    )
+    assert 'build_fixture' not in (config / repositories[0] / 'config.json').read_text()
+
+
+@pytest.mark.parametrize('build', ['', 'build_fixture'])
+def test_default_credential_repositories_without_a_work_token_stay_anonymous(paths, build):
+    launch = paths.state / 'launch'
+    write_files(launch, Credentials(ghcr_build=build), 'macos', ['ghcr.io/example/base'])
+    file = launch / 'docker/buildx/config/ghcr.io/example/base/config.json'
+    assert json.loads(file.read_text()) == {'auths': {}}
+    assert 'credsStore' not in file.read_text()
+
+
+def test_default_credential_repositories_for_other_registries_are_anonymous(paths):
+    launch = paths.state / 'launch'
+    write_files(
+        launch, Credentials(ghcr='ghcr_fixture'), 'macos', ['registry.example:5000/team/app']
+    )
+    file = launch / 'docker/buildx/config/registry.example:5000/team/app/config.json'
+    assert json.loads(file.read_text()) == {'auths': {}}
+
+
+def test_removed_repositories_leave_no_override_in_a_new_launch(paths):
+    first, second = paths.state / 'one', paths.state / 'two'
+    write_files(first, Credentials(ghcr='ghcr_fixture'), 'macos', ['ghcr.io/example/base'])
+    write_files(second, Credentials(ghcr='ghcr_fixture'), 'macos', [])
+    assert (first / 'docker/buildx').exists()
+    assert not (second / 'docker/buildx').exists()

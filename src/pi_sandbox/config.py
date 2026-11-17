@@ -18,6 +18,8 @@ IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 PATTERN = re.compile(r'^[A-Za-z0-9_*]+$')
 MCP_NAME = re.compile(r'^[A-Za-z0-9_-]+$')
 PROFILE_NAME = re.compile(r'^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$')
+REGISTRY_HOST = re.compile(r'^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]{1,5})?$')
+REPOSITORY_COMPONENT = re.compile(r'^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$')
 
 SECTIONS: dict[str, dict[str, str]] = {
     'grants': dict.fromkeys(
@@ -29,7 +31,7 @@ SECTIONS: dict[str, dict[str, str]] = {
     )
     | {'project_state_dirs': 'states'},
     'workspace': {'scratch_root': 'path', 'worktree_root': 'path'},
-    'docker': {'socket': 'path'},
+    'docker': {'socket': 'path', 'default_credential_build_repositories': 'repositories'},
     'credentials': {'dir': 'path', 'env': 'slots'},
     'pi': {'exclude_tools': 'patterns', 'skill_packs': 'paths', 'mcp': 'mcp'},
     'notice': {'lines': 'strings'},
@@ -117,6 +119,22 @@ def validate_mcp(value: Any, location: str) -> Table:
     return result
 
 
+def validate_repository(value: str, location: str) -> str:
+    registry, _, path = value.partition('/')
+    if (
+        not REGISTRY_HOST.fullmatch(registry)
+        or not path
+        or not all(
+            REPOSITORY_COMPONENT.fullmatch(part) and part != 'config.json'
+            for part in path.split('/')
+        )
+    ):
+        raise Refusal(
+            f'{location}: expected <registry>/<repository> without tag or digest: {value!r}'
+        )
+    return value
+
+
 def validate_value(value: Any, kind: str, location: str, paths: Paths) -> Any:
     if kind == 'mcp':
         return validate_mcp(value, location)
@@ -132,6 +150,8 @@ def validate_value(value: Any, kind: str, location: str, paths: Paths) -> Any:
             if kind == 'patterns' and not PATTERN.fullmatch(item):
                 raise Refusal(f'{location}: invalid Pi tool pattern: {item}')
         return items
+    if kind == 'repositories':
+        return [validate_repository(item, location) for item in strings(value, location)]
     if kind == 'vars':
         return variables(value, location)
     if kind == 'states':
@@ -287,6 +307,10 @@ class Config:
     @property
     def slots(self) -> dict[str, Table]:
         return cast(dict[str, Table], self.block('credentials').get('env', {}))
+
+    @property
+    def default_credential_build_repositories(self) -> list[str]:
+        return self.entries('docker', 'default_credential_build_repositories')
 
     @property
     def hooks(self) -> list[Table]:
