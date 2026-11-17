@@ -134,8 +134,8 @@ lines = ["- Example service access is read-only."]
 ```
 
 Sidecars support `pi`, `notice`, `credentials`, `workspace`, launch-dependent
-`grants`, `docker.socket`, `integrations` and `hooks`. Every setting can be
-overridden under `platform.macos` / `platform.linux`. There is no schema/version
+`grants`, `docker.socket`, `docker.default_credential_build_repositories`,
+`integrations` and `hooks`. Every setting can be overridden under `platform.macos` / `platform.linux`. There is no schema/version
 key. Unknown fields refuse, with a native-field replacement hint where available.
 See the [exact schema and migration mapping](docs/design.md#pi-sidecar-schema)
 and [composed example pairs](examples/profiles).
@@ -203,6 +203,10 @@ Without it, GitHub is disabled; inherited human tokens are not substituted.
 Optional `pi-sandbox-ghcr-build.token` gives builds their own `ghcr.io` credential
 (a Buildx alternative config), for hosts whose builds and pulls need different
 GitHub accounts.
+`docker.default_credential_build_repositories` lists full repository names
+(`ghcr.io/org/image`) whose builds keep using the launch's default credential, so a
+host with a personal build credential can still build work-account images; see
+[the design](docs/design.md#credentials).
 Trailing newlines are stripped. Tokens never go into argv, native JSON documents, notices,
 wrappers, or Git configuration. The GitHub token covers one organization;
 private repositories elsewhere answer 404 or ask for credentials by design.

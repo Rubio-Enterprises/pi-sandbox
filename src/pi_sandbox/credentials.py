@@ -1,5 +1,6 @@
 import base64
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,7 +71,12 @@ def ghcr_auth(token: str) -> dict[str, str]:
     return {'auth': base64.b64encode(('x-access-token:' + token).encode()).decode()}
 
 
-def write_files(launch: Path, credentials: Credentials, os: OS) -> None:
+def write_files(
+    launch: Path,
+    credentials: Credentials,
+    os: OS,
+    default_credential_repositories: Sequence[str] = (),
+) -> None:
     private_dir(launch / 'gh')
     private_dir(launch / 'docker')
     auths: dict[str, dict[str, str]] = {'https://index.docker.io/v1/': {}}
@@ -81,6 +87,13 @@ def write_files(launch: Path, credentials: Credentials, os: OS) -> None:
             launch / 'docker/buildx/config/ghcr.io/config.json',
             {'auths': {'ghcr.io': ghcr_auth(credentials.ghcr_build)}},
         )
+    for repository in default_credential_repositories:
+        registry = repository.partition('/')[0]
+        directory = launch / 'docker/buildx/config'
+        for part in repository.split('/'):
+            directory = private_dir(directory / part)
+        default = {registry: auths[registry]} if auths.get(registry) else {}
+        atomic_json(directory / 'config.json', {'auths': default})
     plugins = (
         ['/opt/homebrew/lib/docker/cli-plugins', '/usr/local/lib/docker/cli-plugins']
         if os == 'macos'

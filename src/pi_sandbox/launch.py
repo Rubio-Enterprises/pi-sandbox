@@ -399,7 +399,9 @@ def launch(args: Arguments, platform: Platform) -> int:
             current = grants(config, platform, planned, github=bool(creds.github), create=False)
             current.rw += private_rw
             current.ro.append(str(launch_dir))
-            credentials.write_files(launch_dir, creds, platform.os)
+            credentials.write_files(
+                launch_dir, creds, platform.os, config.default_credential_build_repositories
+            )
             env = environment.build(
                 config,
                 platform,

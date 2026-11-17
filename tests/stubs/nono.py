@@ -130,6 +130,13 @@ capture = dict(
     gh_files=list((path.parent / 'gh').iterdir()),
     docker=json.loads((path.parent / 'docker/config.json').read_text()),
     docker_build=json.loads(build.read_text()) if build.is_file() else None,
+    docker_build_files={
+        str(file.relative_to(path.parent / 'docker/buildx/config')): [
+            json.loads(file.read_text()),
+            file.stat().st_mode & 0o777,
+        ]
+        for file in sorted((path.parent / 'docker/buildx/config').rglob('config.json'))
+    },
     mode=path.parent.stat().st_mode & 0o777,
     browser_mode=Path(env['AGENT_BROWSER_SOCKET_DIR']).stat().st_mode & 0o777,
     tmux_mode=Path(env['TMUX_TMPDIR']).stat().st_mode & 0o777,

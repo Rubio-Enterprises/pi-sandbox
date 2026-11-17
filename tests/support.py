@@ -241,6 +241,7 @@ env = "PI_SANDBOX_INFERENCE_API_KEY"
 missing = "local inference key unavailable; local models cannot authenticate"
 [docker]
 socket = "~/.d/s"
+default_credential_build_repositories = ["ghcr.io/example/base"]
 [platform.linux.docker]
 socket = "/var/run/docker.sock"
 """,
