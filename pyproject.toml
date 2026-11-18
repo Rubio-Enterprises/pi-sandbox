@@ -31,3 +31,6 @@ markers = [
 [tool.pyright]
 include = ["src"]
 typeCheckingMode = "strict"
+
+[tool.uv]
+exclude-newer = "7 days"
