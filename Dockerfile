@@ -1,5 +1,5 @@
 FROM ghcr.io/rubio-enterprises/base:main AS dev
-ENV UV_PYTHON=3.15.1
+ENV UV_PYTHON=3.15.2
 
 USER root
 # Mise 2026.11.1 reads the system config's lock at /etc/mise/mise.lock
