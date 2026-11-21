@@ -21,6 +21,7 @@ PI_FILES = (
     'AGENTS.md',
     'keybindings.json',
     'capability-exposure.json',
+    'loadout.json',
 )
 PS_RULE = '(allow process-exec (literal "/bin/ps") (with no-sandbox))'
 HOST_SOCKET_RULE = (

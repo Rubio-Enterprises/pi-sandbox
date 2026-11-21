@@ -107,7 +107,7 @@ def notice(
         '- Supported runtime directories (read-write): ' + ', '.join(runtime),
         f'- Default screenshots: `{artifacts}/screenshots` (writable, retained after exit).',
         '- Most of $HOME outside these paths is denied.',
-        "- Subagents are allowed: `subagent spawn` starts workers in this launch's private "
+        "- Subagents are allowed: `subagent_spawn` starts workers in this launch's private "
         'tmux server (`$TMUX_TMPDIR`) inside the sandbox. They inherit these grants, limits '
         "and removed tools. Never place workers in Herdr or the host's tmux.",
     ]

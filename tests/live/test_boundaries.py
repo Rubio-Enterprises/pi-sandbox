@@ -141,6 +141,7 @@ def test_real_boundaries(live, org, token):
             'AGENTS.md',
             'keybindings.json',
             'capability-exposure.json',
+            'loadout.json',
         ):
             path = paths.home / '.pi/agent' / name
             matrix.add('pi-append:' + name, 'append', file(path, '{}'), False)
