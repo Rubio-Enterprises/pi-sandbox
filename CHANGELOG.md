@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.2...v0.2.3) (2026-11-21)
+
+
+### Bug Fixes
+
+* align sandbox policy with native subagent tools and loadout ([#55](https://github.com/Rubio-Enterprises/pi-sandbox/issues/55)) ([d6c8e53](https://github.com/Rubio-Enterprises/pi-sandbox/commit/d6c8e53b81501fe0c519b03a718ca2f8994de9db))
+
 ## [0.2.2](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.1...v0.2.2) (2026-11-17)
 
 
