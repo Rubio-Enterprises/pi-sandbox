@@ -78,7 +78,8 @@ def test_full_launch_contract(fixture, os_name, org, token):
     assert argv[-5:] == ['-p', 'hello', '--', '-xt', 'keep']
     assert argv[argv.index('--append-system-prompt') + 1] == cap['notice'].rstrip('\n')
     assert 'mcp__example__delete_' not in cap['notice']
-    assert 'Subagents are allowed' in cap['notice'] and 'wider launch' in cap['notice']
+    assert 'Subagents are allowed: `subagent_spawn` starts workers' in cap['notice']
+    assert 'wider launch' in cap['notice']
     assert cap['mode'] == cap['browser_mode'] == cap['tmux_mode'] == 0o700
     assert str(extra_rw.resolve()) in fs['allow'] and str(extra_ro.resolve()) in fs['read']
     assert str(fixture.paths.home / 'scratch/effort') in fs['allow']

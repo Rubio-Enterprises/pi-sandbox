@@ -141,8 +141,9 @@ def test_host_rules_and_wrapper(config):
         'Operation not permitted',
         'wider launch',
         'NOT isolated',
-        'Subagents are allowed',
-        'Herdr',
+        "- Subagents are allowed: `subagent_spawn` starts workers in this launch's private "
+        'tmux server (`$TMUX_TMPDIR`) inside the sandbox. They inherit these grants, limits '
+        "and removed tools. Never place workers in Herdr or the host's tmux.",
         '/rw',
         '/ro',
         '/runtime',
