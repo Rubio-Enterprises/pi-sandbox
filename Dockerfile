@@ -1,4 +1,4 @@
-FROM ghcr.io/rubio-enterprises/base:main@sha256:88d8310859df133fba54758d500a0bfd7e2631bb78867aa4fb7ea36342cb1495 AS dev
+FROM ghcr.io/rubio-enterprises/base:main@sha256:139727bb5b2e770840e839aff0e82e8507e87f590c166cfd005b12bac7a9e9eb AS dev
 ENV UV_PYTHON=3.15.2
 
 USER root
@@ -8,7 +8,7 @@ COPY image/ /etc/mise/
 RUN --mount=type=secret,id=GITHUB_TOKEN /opt/standards/image/install.sh
 
 FROM dev AS ci
-COPY --link --from=ghcr.io/rubio-enterprises/runner:main@sha256:254c5dabce23dd9a8e703ee47ef34e17c5d77c087ff1ada862bb0bea794a8d4f --chown=1000:1000 /home/runner /opt/actions-runner
+COPY --link --from=ghcr.io/rubio-enterprises/runner:main@sha256:5527b979fbdaa2a55808615febf03d1e42344254ed6bbd0cdb87003723df4ee1 --chown=1000:1000 /home/runner /opt/actions-runner
 WORKDIR /opt/actions-runner
 
 # Same home and cache paths as the eventual runner, not root's throwaway caches
