@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.3...v0.3.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* adopt the shared recipe vocabulary ([#63](https://github.com/Rubio-Enterprises/pi-sandbox/issues/63))
+
+### Features
+
+* adopt the shared recipe vocabulary ([#63](https://github.com/Rubio-Enterprises/pi-sandbox/issues/63)) ([a2ecdb9](https://github.com/Rubio-Enterprises/pi-sandbox/commit/a2ecdb9c73becec0475edd2d818d41c00636b754))
+
 ## [0.2.3](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.2...v0.2.3) (2026-11-21)
 
 
