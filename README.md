@@ -288,7 +288,7 @@ issue tracker. Read [AGENTS.md](AGENTS.md) and [the design](docs/design.md)
 before changing launch behavior. Use Conventional Commits.
 
 ```sh
-just build
+just build-dev
 just setup
 just check
 just test
