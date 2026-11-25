@@ -349,6 +349,7 @@ def launch(args: Arguments, platform: Platform) -> int:
     with signals():
         try:
             launch_dir = temporary_dir(paths.launch_state, 'launch.')
+            script = render_wrapper(config, platform, args, pi, launch_dir)
             pins = profile.sync(config, pin=True)
             atomic_json(launch_dir / 'engine.json', prefix(config, planned))
             if platform.os == 'linux' and config.selected:
@@ -431,10 +432,7 @@ def launch(args: Arguments, platform: Platform) -> int:
                     [*creds.notices, *extra_notices],
                 )
             )
-            wrapper.write(
-                launch_dir,
-                render_wrapper(config, platform, args, pi, launch_dir),
-            )
+            wrapper.write(launch_dir, script)
             profile_path = launch_dir / 'profile.json'
             atomic_json(profile_path, profile.assemble(config, platform, current, env, rules))
             if platform.os == 'macos' and not creds.github:
@@ -467,6 +465,18 @@ def launch(args: Arguments, platform: Platform) -> int:
                         profile.release(pins)
 
 
+def pi_extensions(config: Config) -> list[str]:
+    entries = config.entries('pi', 'extensions')
+    for entry in entries:
+        try:
+            info = os.stat(entry)
+        except OSError as error:
+            raise Refusal(f'pi.extensions: cannot read {entry}: {error.strerror}') from error
+        if not stat.S_ISREG(info.st_mode) or not os.access(entry, os.R_OK):
+            raise Refusal(f'pi.extensions: not a readable regular file: {entry}')
+    return entries
+
+
 def render_wrapper(
     config: Config, platform: Platform, args: Arguments, pi: str, launch: Path
 ) -> str:
@@ -477,6 +487,7 @@ def render_wrapper(
         pack.skills(
             [pack.directory(config.paths), *(Path(p) for p in config.entries('pi', 'skill_packs'))]
         ),
+        extensions=pi_extensions(config),
         op=platform.os == 'linux' and 'onepassword' in config.integrations,
     )
 

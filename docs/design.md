@@ -110,7 +110,7 @@ All controller subcommands accept `--profile NAME` with the same environment fal
 | `chain` | Print resolved user/non-user traversal and each merged sidecar path (or none). |
 | `config --json` | Print `selected`, ordered `chain`, merged `sidecar`, ordered `sidecars` paths, and `rendered_exclude_tools`. |
 | `profile [engine flags]` | Install snapshots; preview launch nono JSON on stdout, prefix/invocation/Pi wrapper on stderr; no credentials or hooks. |
-| `validate` | Validate both sidecar platforms and use nono to validate installed JSON and resolve the complete chain. |
+| `validate` | Validate both sidecar platforms, check each `pi.extensions` entry is a readable regular file, and use nono to validate installed JSON and resolve the complete chain. |
 | `doctor [--workdir DIR]` | Validate plus nono/pack/kernel/Landlock checks and advisory MCP diagnostics. |
 | `prune` | Remove only unreferenced engine-owned snapshots older than 24 hours and not actively pinned. |
 
@@ -144,6 +144,7 @@ inside `platform.macos` / `platform.linux`; only `platform` itself cannot nest.
 | `pi.mcp.<logical>.hide_tools` | List of server-local tool names/patterns; nonempty, no whitespace, commas or controls; only `*` is wildcard. |
 | `pi.mcp.<logical>.names` | List of server aliases; logical names and aliases match `[A-Za-z0-9_-]+`. |
 | `pi.skill_packs` | List of absolute pack-directory paths. |
+| `pi.extensions` | List of absolute Pi extension file paths; each must be a readable regular file at launch, or the launch refuses naming it. Lists merge across profiles. |
 | `notice.lines` | List of strings. |
 | `credentials.dir` | Absolute directory path. |
 | `credentials.env.<slot>.file` | Token filename relative to credentials.dir without `..`, or an absolute path. |
@@ -334,11 +335,12 @@ Hook argv/inline programs are trusted policy, not inferred or rewritten by the e
    main checkout RO. macOS adds @git:common-dir RW and @git:worktree RO, and an overridden
    XDG state mise directory RW.
 5. Resolve Git identity. Allocate private launch/artifact/runtime/browser/tmux roots.
+   Render the Pi wrapper, refusing a `pi.extensions` entry that is not a readable regular file.
    Install/pin the complete snapshot graph; write the launch prefix; resolve a provisional
    native manifest before credentials. Use its RW grants to validate sidecar hook locations.
    Execute hooks before any token file or credential command.
 6. Read credentials, finish conditional grants, write isolated gh/Docker/Git config, build
-   environment and render the Pi wrapper and notice. Launch directory is RO except private
+   environment, write the notice and the Pi wrapper. Launch directory is RO except private
    gh/Docker subdirectories; cache/socket/artifact/runtime roots are RW.
 7. Write the top nono document. macOS ordering is Git → native user rules → hook → host → static.
    On tokenless macOS launches verify effective Keychain denial without querying Keychain.
@@ -453,7 +455,8 @@ inside the sandbox.
 `<launch>/bin/pi` is a POSIX `sh` script that `exec`s the absolute real Pi with: one
 `--exclude-tools` (merged, de-duplicated, comma-joined) when any pattern exists; one `--skill`
 per existing skill root of the `nolabs-ai/pi` pack and each `pi.skill_packs` entry (roots from
-the pack's `package.json` `pi.skills`, default `skills`); `--append-system-prompt "$(cat
+the pack's `package.json` `pi.skills`, default `skills`); one `-e <path>` per merged
+`pi.extensions` entry, in list order; `--append-system-prompt "$(cat
 <launch>/notice.md)"`; then `"$@"`. Subagent workers start `pi` from `PATH`, so they inherit it.
 
 The notice has two parts: a static policy section (sandbox denial = stop and report; ask for a

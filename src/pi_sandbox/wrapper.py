@@ -1,4 +1,5 @@
 import shlex
+from collections.abc import Sequence
 from pathlib import Path
 
 from pi_sandbox.config import Config
@@ -7,7 +8,15 @@ from pi_sandbox.paths import private_dir
 from pi_sandbox.platform import Platform
 
 
-def render(pi: str, launch: Path, patterns: list[str], skills: list[str], *, op: bool) -> str:
+def render(
+    pi: str,
+    launch: Path,
+    patterns: list[str],
+    skills: list[str],
+    *,
+    op: bool,
+    extensions: Sequence[str] = (),
+) -> str:
     lines = ['#!/bin/sh']
     if op:
         lines += [
@@ -20,6 +29,8 @@ def render(pi: str, launch: Path, patterns: list[str], skills: list[str], *, op:
         args += ['--exclude-tools', ','.join(dict.fromkeys(patterns))]
     for skill in skills:
         args += ['--skill', skill]
+    for extension in extensions:
+        args += ['-e', extension]
     lines.append(
         'exec '
         + shlex.join(args)

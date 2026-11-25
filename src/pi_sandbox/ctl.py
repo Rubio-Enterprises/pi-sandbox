@@ -17,7 +17,15 @@ from pi_sandbox.config import (
     resolve,
     table,
 )
-from pi_sandbox.launch import extra_path, plan, prefix, preview, render_wrapper, tool
+from pi_sandbox.launch import (
+    extra_path,
+    pi_extensions,
+    plan,
+    prefix,
+    preview,
+    render_wrapper,
+    tool,
+)
 from pi_sandbox.paths import Paths, atomic_json, private_dir
 from pi_sandbox.platform import Platform
 
@@ -25,6 +33,7 @@ from pi_sandbox.platform import Platform
 def validate(config: Config) -> None:
     resolve(config.paths, 'macos', config.profiles)
     resolve(config.paths, 'linux', config.profiles)
+    pi_extensions(config)
     tool('nono')
     pack.require(config.paths)
     private_dir(config.paths.launch_state)
