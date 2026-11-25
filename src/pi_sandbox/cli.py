@@ -7,10 +7,14 @@ from pathlib import Path
 from pi_sandbox import Refusal
 from pi_sandbox.platform import Platform
 
+WORKDIR_NAME = re.compile(r'[a-z0-9]+(?:-[a-z0-9]+)*')
+
 
 @dataclass
 class Arguments:
     workdir: str = field(default_factory=os.getcwd)
+    workdir_given: bool = False
+    workdir_name: str = ''
     scratch: str = ''
     profile: str | None = None
     rw: list[str] = field(default_factory=list[str])
@@ -40,6 +44,14 @@ def split(args: list[str]) -> Arguments:
                 raise Refusal('--profile needs a Sandbox Profile name')
         elif arg.startswith('--workdir='):
             result.workdir = arg.split('=', 1)[1]
+            result.workdir_given = True
+        elif arg.startswith('--workdir-name='):
+            result.workdir_name = arg.split('=', 1)[1]
+            if not WORKDIR_NAME.fullmatch(result.workdir_name):
+                raise Refusal(
+                    '--workdir-name takes lowercase letters and digits, '
+                    'with single hyphens between them'
+                )
         elif arg.startswith('--scratch='):
             result.scratch = arg.split('=', 1)[1]
         elif arg.split('=', 1)[0] in ('--add-dirs', '--add-dirs-ro', '--exclude-tools', '-xt'):

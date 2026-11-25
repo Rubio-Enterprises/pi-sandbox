@@ -89,7 +89,8 @@ keep their respective filesystem, platform, Git, policy, launch integration and 
 | Flag | Meaning |
 | --- | --- |
 | `--profile NAME`, `--profile=NAME` | Select a Sandbox Profile; overrides `PI_SANDBOX_PROFILE`. |
-| `--workdir=DIR` | Project directory, default PWD. Must exist; cannot contain HOME. |
+| `--workdir=DIR` | Project directory, default PWD. Must exist; cannot contain HOME. Under `workspace.workdir_root`, must be a folder directly in the root. |
+| `--workdir-name=NAME` | With `workspace.workdir_root`: name part of a new workdir, lowercase letters and digits with single hyphens between them. |
 | `--scratch=NAME` | Create/grant `<workspace.scratch_root>/NAME`; single effort name matching `[A-Za-z0-9][A-Za-z0-9_-]*`. |
 | `--add-dirs[=]DIRS`, `--add-dirs-ro[=]DIRS` | Extra RW/RO colon-separated directories. |
 | `--exclude-tools[=]P,Q`, `-xt[=]P,Q` | Merge Pi exclusions with sidecar exclusions. |
@@ -154,6 +155,8 @@ inside `platform.macos` / `platform.linux`; only `platform` itself cannot nest.
 | `credentials.env.<slot>.missing`, `.notice` | Optional message strings; missing supports `{path}`. |
 | `workspace.scratch_root` | Absolute directory path. |
 | `workspace.worktree_root` | Absolute directory template, supports `{repo}`. |
+| `workspace.workdir_root` | Absolute directory path. When set, the workdir is a folder directly in it: a launch from one reuses it; a launch from the root or outside it creates `<prefix>[<name>-]<id>` (6 random lowercase letters or digits, mode 0700, never an existing name) and prints its path; a launch deeper inside one, or an explicit `--workdir` elsewhere, refuses. |
+| `workspace.workdir_prefix` | String of lowercase letters and digits ending in a hyphen, such as `agent-`; default empty. |
 | `grants.protected_checkouts` | List of absolute checkout paths; RO plus write protection. |
 | `grants.runtime_dirs` | List of absolute directories, created private and granted RW. |
 | `grants.project_state_dirs` | Origin-URL-to-string-list map; paths relative to XDG state, without `..`, empty or `.`. |
@@ -319,9 +322,10 @@ Hook argv/inline programs are trusted policy, not inferred or rewritten by the e
 
 ## Launch sequence
 
-1. Refuse nested nono; split arguments; locate Pi/nono/Git; validate the real workdir.
+1. Refuse nested nono; split arguments; locate Pi/nono/Git.
 2. Select the Sandbox Profile, load native user inheritance and merge Pi sidecars.
-   Check nono version and pinned pack integrity; compute the immutable graph.
+   Check nono version, pinned pack integrity and `pi.extensions`; choose the workdir (creating a
+   new one under `workspace.workdir_root`) and validate the real workdir; compute the immutable graph.
 3. On Linux require kernel >=6.12; on WSL refuse grants on /mnt/<drive>. Git launches require
    linked worktrees, the standard private Git-dir layout and inactive extensions.worktreeConfig.
    Caller grants must be directories and must not overlap protected policy, checkouts, credential

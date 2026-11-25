@@ -65,6 +65,9 @@ pi-sandbox-ctl profile --workdir=~/Code/example
 ```
 
 The workdir must exist and cannot be HOME, its ancestor, or `/`.
+A profile whose sidecar sets `workspace.workdir_root` works only in folders directly in that
+root: a launch from one of them reuses it, and a launch from anywhere else creates a new private
+folder `<workdir_prefix>[<--workdir-name>-]<6 random characters>` there and says its path.
 On Linux, a Git project must be a linked worktree, not the main checkout.
 Without a selected Sandbox Profile, Docker and credential-store integrations are disabled.
 
@@ -73,6 +76,7 @@ accept colon-separated directories. A literal `--`, including the separator,
 passes all following arguments unchanged to Pi. Exclusions from Pi sidecars,
 `--exclude-tools`, and `-xt` become one de-duplicated Pi flag.
 `--scratch` requires a Pi sidecar's scratch root and a single effort name.
+`--workdir-name` requires a sidecar's `workspace.workdir_root`.
 
 Exit status is Pi's status, 2 for a refused launch, or 128 + signal number.
 Private launch, browser, and tmux directories are cleaned on exit, including

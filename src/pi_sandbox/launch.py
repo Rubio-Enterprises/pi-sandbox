@@ -1,14 +1,16 @@
 import os
+import secrets
 import shutil
 import signal
 import stat
+import string
 import subprocess
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Any
+from typing import Any, cast
 
 from pi_sandbox import (
     Refusal,
@@ -95,6 +97,59 @@ def extra_path(value: str, home: Path) -> Path:
         value = str(home) + value[1:]
     path = Path(value)
     return path.absolute() if path.is_symlink() and not path.exists() else path.resolve()
+
+
+WORKDIR_ID_LENGTH = 6
+WORKDIR_ID_ATTEMPTS = 8
+
+
+def workdir_id() -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(WORKDIR_ID_LENGTH))
+
+
+def select_workdir(
+    config: Config, args: Arguments, home: Path, new_id: Callable[[], str] = workdir_id
+) -> str:
+    """The workdir as given, or, under workspace.workdir_root, one of its folders or a new one."""
+    workspace = config.block('workspace')
+    root_value = cast(str | None, workspace.get('workdir_root'))
+    if not root_value:
+        if args.workdir_name:
+            raise Refusal(
+                '--workdir-name requires workspace.workdir_root in a Sandbox Profile sidecar'
+            )
+        return args.workdir
+    root = Path(root_value)
+    current = extra_path(args.workdir, home)
+    real_root = root.resolve()
+    if current.parent == real_root and current.is_dir():
+        if args.workdir_name:
+            raise Refusal(f'--workdir-name starts a new workdir, but {current} already is one')
+        return str(current)
+    if args.workdir_given:
+        raise Refusal(f'--workdir must be an existing folder directly in {root} for this profile')
+    if current != real_root and current.is_relative_to(real_root):
+        raise Refusal(
+            f'start in a folder directly in {root}, or outside it for a new one, not in {current}'
+        )
+    stem = cast(str, workspace.get('workdir_prefix', '')) + (
+        args.workdir_name + '-' if args.workdir_name else ''
+    )
+    return str(new_workdir(root, stem, new_id))
+
+
+def new_workdir(root: Path, stem: str, new_id: Callable[[], str]) -> Path:
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for _ in range(WORKDIR_ID_ATTEMPTS):
+        path = root / (stem + new_id())
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            continue
+        message(f'new workdir {path}')
+        return path.resolve()
+    raise Refusal(f'could not create a new workdir in {root}: every name tried exists')
 
 
 def plan(config: Config, platform: Platform, args: Arguments) -> Plan:
@@ -331,10 +386,12 @@ def launch(args: Arguments, platform: Platform) -> int:
     tool('nono')
     tool('git')
     paths = Paths.from_env(os.environ)
-    workdir(args.workdir, paths.home)
     config = resolve(paths, platform.os, selected=args.profile)
     pack.version()
     pack.require(paths)
+    pi_extensions(config)
+    args.workdir = select_workdir(config, args, paths.home)
+    workdir(args.workdir, paths.home)
     planned = plan(config, platform, args)
     ident = identity(planned.workdir)
     if not all(ident):

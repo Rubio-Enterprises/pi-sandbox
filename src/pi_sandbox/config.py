@@ -17,6 +17,7 @@ INTEGRATIONS = {'credential-stores', 'onepassword', 'cloud-credentials', 'keycha
 IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 PATTERN = re.compile(r'^[A-Za-z0-9_*]+$')
 MCP_NAME = re.compile(r'^[A-Za-z0-9_-]+$')
+WORKDIR_PREFIX = re.compile(r'^(?:[a-z0-9]+-)+$')
 PROFILE_NAME = re.compile(r'^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$')
 REGISTRY_HOST = re.compile(r'^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]{1,5})?$')
 REPOSITORY_COMPONENT = re.compile(r'^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$')
@@ -30,7 +31,12 @@ SECTIONS: dict[str, dict[str, str]] = {
         'paths',
     )
     | {'project_state_dirs': 'states'},
-    'workspace': {'scratch_root': 'path', 'worktree_root': 'path'},
+    'workspace': {
+        'scratch_root': 'path',
+        'worktree_root': 'path',
+        'workdir_root': 'path',
+        'workdir_prefix': 'prefix',
+    },
     'docker': {'socket': 'path', 'default_credential_build_repositories': 'repositories'},
     'credentials': {'dir': 'path', 'env': 'slots'},
     'pi': {
@@ -145,6 +151,13 @@ def validate_value(value: Any, kind: str, location: str, paths: Paths) -> Any:
         return validate_mcp(value, location)
     if kind == 'path':
         return paths.expand(string(value, location))
+    if kind == 'prefix':
+        prefix = string(value, location)
+        if prefix and not WORKDIR_PREFIX.fullmatch(prefix):
+            raise Refusal(
+                f'{location}: expected lowercase letters and digits ending in a hyphen: {prefix!r}'
+            )
+        return prefix
     if kind in ('strings', 'paths', 'names', 'patterns'):
         items = strings(value, location)
         if kind == 'paths':
