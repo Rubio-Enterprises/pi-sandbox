@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.3.0...v0.3.1) (2026-11-25)
+
+
+### Features
+
+* load pi extensions from a sandbox profile ([#66](https://github.com/Rubio-Enterprises/pi-sandbox/issues/66)) ([008334f](https://github.com/Rubio-Enterprises/pi-sandbox/commit/008334f08018dca2e9d20d82c3692ced82e4433a))
+
 ## [0.3.0](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.2.3...v0.3.0) (2026-11-24)
 
 
