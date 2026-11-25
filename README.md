@@ -163,6 +163,15 @@ and `mcp__example__write_file`, and their local-example equivalents.
 Use `pi.exclude_tools` for full Pi patterns, including non-MCP tools.
 All exclusions merge with CLI patterns into one de-duplicated flag.
 
+`pi.extensions` lists Pi extension files for the launch to load, such as
+`extensions = ["~/.local/share/example/guard.ts"]`. Entries merge across the
+chain like other lists. Each must be absolute after expansion and name a
+readable regular file when the launch starts, or the launch refuses, naming
+the entry, before any hook runs. The Pi wrapper passes one `-e <path>` per
+entry, in list order, after its `--skill` flags and before your own Pi
+arguments. These extensions therefore load before any `-e` you pass and before
+extensions from Pi settings. Subagents use the same wrapper, so they load them too.
+
 ```sh
 export PI_SANDBOX_PROFILE=pi-machine
 pi-sandbox-ctl chain
@@ -173,7 +182,9 @@ pi-sandbox-ctl doctor --workdir ~/Code/example
 ```
 
 All controller commands accept `--profile <name>`. `config --json` prints the
-ordered chain, merged sidecar, sidecar paths and `rendered_exclude_tools`.
+ordered chain, merged sidecar, sidecar paths and `rendered_exclude_tools`, with
+`pi.extensions` under the merged sidecar's `pi`. `validate`, `doctor` and
+`profile` refuse a missing or unreadable `pi.extensions` entry too.
 `profile` prints launch nono JSON on stdout and the launch-local prefix,
 invocation and Pi wrapper on stderr. Preview installs immutable native
 snapshots, but creates no launch/runtime roots and executes no hooks or credentials.

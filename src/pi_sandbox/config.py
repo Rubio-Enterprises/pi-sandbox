@@ -33,7 +33,12 @@ SECTIONS: dict[str, dict[str, str]] = {
     'workspace': {'scratch_root': 'path', 'worktree_root': 'path'},
     'docker': {'socket': 'path', 'default_credential_build_repositories': 'repositories'},
     'credentials': {'dir': 'path', 'env': 'slots'},
-    'pi': {'exclude_tools': 'patterns', 'skill_packs': 'paths', 'mcp': 'mcp'},
+    'pi': {
+        'exclude_tools': 'patterns',
+        'skill_packs': 'paths',
+        'extensions': 'paths',
+        'mcp': 'mcp',
+    },
     'notice': {'lines': 'strings'},
 }
 
