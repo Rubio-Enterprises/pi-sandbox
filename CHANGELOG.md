@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.3.1...v0.3.2) (2026-11-25)
+
+
+### Features
+
+* create a new workdir under a profile's workdir root ([948f144](https://github.com/Rubio-Enterprises/pi-sandbox/commit/948f144d0f7a427fafd26fdfad36a67d8e05095d))
+
 ## [0.3.1](https://github.com/Rubio-Enterprises/pi-sandbox/compare/v0.3.0...v0.3.1) (2026-11-25)
 
 
